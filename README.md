@@ -24,8 +24,10 @@ GD後の相互評価を、学生入力と管理者レポートに分けて扱う
 
 - GDタイプ別の評価質問
 - メンバーごとの相互評価入力
+- 学生マイページで過去セッションの結果を確認
 - ブラウザ内保存によるセッション管理
 - 5軸スコアとタイプ判定
+- セッション内平均・順位・平均との差の表示
 - 管理者向けの個人レポート
 - CSV出力
 
@@ -35,12 +37,12 @@ GD後の相互評価を、学生入力と管理者レポートに分けて扱う
 
 1. SupabaseのSQL Editorで [supabase-schema.sql](/Users/hatakeiichiro/Documents/New%20project/supabase-schema.sql) の中身を実行します。
 2. SupabaseのAuthenticationで管理者ユーザーを作成します。
-3. [src/config.js](/Users/hatakeiichiro/Documents/New%20project/src/config.js) にSupabaseのProject URLを入れます。
+3. ローカル確認では `src/config.example.js` を参考に `src/config.local.js` を作ります。このファイルはGitHubにはアップロードしません。
 
    ```js
    window.OPEN_GD_CONFIG = {
      SUPABASE_URL: "https://xxxxx.supabase.co",
-     SUPABASE_ANON_KEY: "sb_publishable_xYT51KUOTcBLvOoJh_kTRA_3aCZUyzn",
+     SUPABASE_ANON_KEY: "sb_publishable_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
      ADMIN_EMAILS: ["admin@example.com"],
    };
    ```
@@ -64,3 +66,20 @@ Vercelでは静的サイトとして公開できます。
 5. Deployを押します。
 
 公開後、Vercelが発行するURLを参加者に共有します。
+
+VercelのProject Settingsで、以下のEnvironment Variablesを設定してください。
+
+```txt
+SUPABASE_URL
+SUPABASE_ANON_KEY
+ADMIN_EMAILS
+```
+
+`ADMIN_EMAILS` は管理者メールをカンマ区切りで入れます。
+
+VercelのBuild設定は以下です。
+
+```txt
+Build Command: node build.mjs
+Output Directory: dist
+```

@@ -1,17 +1,20 @@
 const { useState, useEffect, useCallback } = React;
 
 // ─── Design Tokens ────────────────────────────────────────────
+// CAREER ROOKIES GP-inspired: 赤×白×黒のビジコン・決勝感
 const T = {
   white:  "#ffffff",
-  ink:    "#111111",
-  inkMid: "#2a2a2a",
-  inkSub: "#6b6b6b",
-  g100:   "#f5f5f5",
-  g200:   "#e8e8e8",
-  g300:   "#cccccc",
-  blue:   "#2E5F8A",
-  blueL:  "#dce8f3",
-  blueD:  "#1a4a72",
+  ink:    "#0a0a0a",     // near-black hero
+  inkMid: "#1a1a1a",
+  inkSub: "#6f6f72",
+  g100:   "#f6f6f7",
+  g200:   "#e6e6e8",
+  g300:   "#c8c8cc",
+  // semantic "accent" — was blue, now red. Names kept so the rest of the file
+  // doesn't need rewriting.
+  blue:   "#E50914",     // primary red
+  blueL:  "#fff0f1",     // pale red tint
+  blueD:  "#0a0a0a",     // deep = black (for contrast accents)
 };
 
 // ─── Questions ────────────────────────────────────────────────
@@ -271,56 +274,75 @@ function uid() { return Math.random().toString(36).slice(2,8).toUpperCase(); }
 
 // ─── CSS ─────────────────────────────────────────────────────
 const css = `
-  @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700;800&display=swap');
+  @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700;800;900&family=Anton&family=Oswald:wght@600;700&display=swap');
   *{box-sizing:border-box;margin:0;padding:0;}
-  body{font-family:'Noto Sans JP',Meiryo,sans-serif;background:${T.g100};color:${T.ink};}
+  body{font-family:'Noto Sans JP',Meiryo,sans-serif;background:${T.white};color:${T.ink};}
   button,input,select,textarea{font-family:'Noto Sans JP',Meiryo,sans-serif;}
   @keyframes fadeUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
   @keyframes reveal{from{opacity:0;transform:scale(.97)}to{opacity:1;transform:scale(1)}}
+  @keyframes slashIn{from{transform:translateX(-30px);opacity:0}to{transform:translateX(0);opacity:1}}
   .fu{animation:fadeUp .3s ease both}
   .rv{animation:reveal .4s cubic-bezier(.22,1,.36,1) both}
-  input:focus,select:focus,textarea:focus{outline:none;border-color:${T.blue}!important;}
+  .slashIn{animation:slashIn .5s cubic-bezier(.22,1,.36,1) both}
+  .display{font-family:'Anton','Oswald','Noto Sans JP',sans-serif;letter-spacing:.02em;}
+  .mono{font-family:'Oswald','Courier New',monospace;}
+  input:focus,select:focus,textarea:focus{outline:none;border-color:${T.blue}!important;box-shadow:0 0 0 3px ${T.blueL};}
+  ::selection{background:${T.blue};color:${T.white};}
 `;
 
 // ─── Atoms ───────────────────────────────────────────────────
 const Tag = ({ children, blue, small }) => (
   <span style={{
-    display:"inline-block", padding: small?"1px 6px":"2px 9px",
-    borderRadius:2, fontSize: small?8:9, fontWeight:700, letterSpacing:"0.05em",
-    background: blue ? T.blueL : T.g100,
-    color: blue ? T.blue : T.inkSub,
-    border:`1px solid ${blue ? T.blue : T.g200}`,
+    display:"inline-block", padding: small?"2px 8px":"3px 11px",
+    borderRadius:0, fontSize: small?9:10, fontWeight:800, letterSpacing:"0.08em",
+    background: blue ? T.blue : T.ink,
+    color: T.white,
+    border:`1px solid ${blue ? T.blue : T.ink}`,
+    textTransform:"uppercase",
   }}>{children}</span>
 );
 
 const Btn = ({ children, onClick, variant="primary", disabled, full, small, style:sx={}, sx:legacySx={} }) => {
   const s = {
-    primary:{ background:T.blue, color:T.white, border:`1px solid ${T.blue}` },
-    ghost:  { background:T.white, color:T.inkMid, border:`1px solid ${T.g200}` },
-    danger: { background:T.white, color:"#b05050", border:"1px solid #e8c0c0" },
+    primary:{ background:T.ink, color:T.white, border:`1px solid ${T.ink}`,
+      boxShadow: disabled ? "none" : `4px 4px 0 ${T.blue}` },
+    ghost:  { background:T.white, color:T.ink, border:`1.5px solid ${T.ink}` },
+    danger: { background:T.white, color:T.blue, border:`1.5px solid ${T.blue}` },
   }[variant];
   return (
     <button onClick={onClick} disabled={disabled} style={{
-      ...s, borderRadius:2, padding: small?"6px 14px":"10px 22px",
-      fontSize: small?11:13, fontWeight:700,
+      ...s, borderRadius:0, padding: small?"6px 14px":"12px 24px",
+      fontSize: small?11:13, fontWeight:800,
       cursor: disabled?"not-allowed":"pointer",
       opacity: disabled?0.4:1, width: full?"100%":"auto",
-      transition:"all 0.15s", letterSpacing:"0.03em", ...sx, ...legacySx,
-    }}>{children}</button>
+      transition:"transform 0.12s ease, box-shadow 0.12s ease",
+      letterSpacing:"0.08em", textTransform: small?"none":"uppercase",
+      ...sx, ...legacySx,
+    }}
+    onMouseDown={e=>{ if(variant==="primary" && !disabled){ e.currentTarget.style.transform="translate(2px,2px)"; e.currentTarget.style.boxShadow=`2px 2px 0 ${T.blue}`; } }}
+    onMouseUp={e=>{ if(variant==="primary" && !disabled){ e.currentTarget.style.transform=""; e.currentTarget.style.boxShadow=`4px 4px 0 ${T.blue}`; } }}
+    onMouseLeave={e=>{ if(variant==="primary" && !disabled){ e.currentTarget.style.transform=""; e.currentTarget.style.boxShadow=`4px 4px 0 ${T.blue}`; } }}>{children}</button>
   );
 };
 
 const Card = ({ children, style:sx={}, accent }) => (
   <div style={{
-    background:T.white, border:`1px solid ${T.g200}`,
-    borderTop: accent ? `3px solid ${T.blue}` : undefined,
-    borderRadius:2, ...sx,
+    background:T.white, border:`1.5px solid ${T.ink}`,
+    borderTop: accent ? `5px solid ${T.blue}` : `1.5px solid ${T.ink}`,
+    borderRadius:0,
+    boxShadow: accent ? `6px 6px 0 ${T.ink}` : "none",
+    ...sx,
   }}>{children}</div>
 );
 
 const SLabel = ({ children }) => (
-  <p style={{ fontSize:9, fontWeight:700, letterSpacing:"0.12em",
-    color:T.blue, fontFamily:"'Courier New',monospace" }}>{children}</p>
+  <p style={{ display:"inline-flex", alignItems:"center", gap:8,
+    fontSize:10, fontWeight:800, letterSpacing:"0.18em",
+    color:T.blue, fontFamily:"'Oswald','Courier New',monospace",
+    textTransform:"uppercase" }}>
+    <span style={{ display:"inline-block", width:14, height:2, background:T.blue }} />
+    {children}
+  </p>
 );
 
 const Divider = ({ my=16 }) => (
@@ -330,37 +352,68 @@ const Divider = ({ my=16 }) => (
 const Input = ({ value, onChange, placeholder, type="text", onKeyDown, style:sx={} }) => (
   <input type={type} value={value} onChange={e=>onChange(e.target.value)}
     placeholder={placeholder} onKeyDown={onKeyDown}
-    style={{ width:"100%", border:`1.5px solid ${T.g200}`, borderRadius:2,
-      padding:"9px 12px", fontSize:13, color:T.ink,
-      background:T.g100, transition:"border-color 0.15s", ...sx }} />
+    style={{ width:"100%", border:`1.5px solid ${T.ink}`, borderRadius:0,
+      padding:"11px 14px", fontSize:14, color:T.ink, fontWeight:600,
+      background:T.white, transition:"all 0.15s", ...sx }} />
 );
 
 const FieldLabel = ({ children }) => (
-  <p style={{ fontSize:10, fontWeight:700, color:T.inkSub,
-    letterSpacing:"0.08em", textTransform:"uppercase", marginBottom:5 }}>{children}</p>
+  <p style={{ fontSize:10, fontWeight:800, color:T.ink,
+    letterSpacing:"0.14em", textTransform:"uppercase", marginBottom:6,
+    fontFamily:"'Oswald','Noto Sans JP',sans-serif" }}>{children}</p>
 );
 
 // ─── Nav ─────────────────────────────────────────────────────
-const Nav = ({ mode, setMode }) => (
-  <div style={{ background:T.white, borderBottom:`1px solid ${T.g200}`,
-    position:"sticky", top:0, zIndex:100 }}>
-    <div style={{ maxWidth:880, margin:"0 auto", padding:"0 24px",
-      display:"flex", alignItems:"center", justifyContent:"space-between", height:50 }}>
-      <div style={{ display:"flex", alignItems:"center", gap:10 }}>
-        <div style={{ width:3, height:18, background:T.blue }} />
-        <span style={{ fontFamily:"'Courier New',monospace", fontSize:12,
-          fontWeight:700, color:T.inkMid, letterSpacing:"0.1em" }}>OPEN GD</span>
+const Nav = ({ mode, goStudent }) => (
+  <div style={{ background:T.ink, position:"sticky", top:0, zIndex:100,
+    borderBottom:`3px solid ${T.blue}` }}>
+    <div style={{ maxWidth:1040, margin:"0 auto", padding:"0 24px",
+      display:"flex", alignItems:"center", justifyContent:"space-between", height:64 }}>
+      <div style={{ display:"flex", alignItems:"center", gap:14 }}>
+        <div style={{ display:"flex", alignItems:"center", gap:0 }}>
+          <div style={{ background:T.blue, color:T.white, padding:"4px 8px",
+            fontFamily:"Anton,'Oswald',sans-serif", fontSize:18, fontWeight:700,
+            letterSpacing:"0.06em", lineHeight:1 }}>GD</div>
+          <div style={{ background:T.white, color:T.ink, padding:"4px 8px",
+            fontFamily:"Anton,'Oswald',sans-serif", fontSize:18, fontWeight:700,
+            letterSpacing:"0.06em", lineHeight:1 }}>OPEN</div>
+        </div>
+        <div style={{ display:"flex", flexDirection:"column", gap:2 }}>
+          <span style={{ fontFamily:"'Oswald','Courier New',monospace", fontSize:9,
+            fontWeight:700, color:T.blue, letterSpacing:"0.25em" }}>PEER EVALUATION SYSTEM</span>
+          <span style={{ fontSize:10, color:"rgba(255,255,255,0.5)",
+            letterSpacing:"0.1em", fontWeight:600 }}>グループディスカッション相互評価</span>
+        </div>
       </div>
-      <div style={{ display:"flex", gap:4 }}>
-        {[["student","学生"],["admin","管理者"]].map(([m,l])=>(
-          <button key={m} onClick={()=>setMode(m)} style={{
-            background: mode===m?T.blue:"none",
-            color: mode===m?T.white:T.inkSub,
-            border:"none", borderRadius:2, padding:"5px 14px",
-            fontSize:10, fontWeight:700, cursor:"pointer",
-            transition:"all 0.15s", letterSpacing:"0.05em",
-          }}>{l}</button>
-        ))}
+      <div style={{ display:"flex", alignItems:"center", gap:14 }}>
+        {/* current-mode badge */}
+        <div style={{ display:"flex", alignItems:"center", gap:0 }}>
+          <span className="mono" style={{ fontSize:9, fontWeight:700,
+            color:"rgba(255,255,255,0.45)", letterSpacing:"0.22em",
+            marginRight:10 }}>MODE</span>
+          <span style={{ background: mode==="admin" ? T.blue : T.white,
+            color: mode==="admin" ? T.white : T.ink,
+            padding:"6px 14px", fontSize:11, fontWeight:800,
+            letterSpacing:"0.12em",
+            fontFamily:"'Oswald','Noto Sans JP',sans-serif" }}>
+            {mode==="admin" ? "管理者 / ADMIN" : "学生 / STUDENT"}
+          </span>
+        </div>
+        {/* admin→学生 ショートカット */}
+        {mode === "admin" && (
+          <button onClick={goStudent} style={{
+            background:"transparent", color:T.white,
+            border:`1.5px solid rgba(255,255,255,0.4)`,
+            borderRadius:0, padding:"6px 14px",
+            fontSize:10, fontWeight:800, cursor:"pointer",
+            transition:"all 0.15s", letterSpacing:"0.12em",
+            fontFamily:"'Oswald','Noto Sans JP',sans-serif",
+          }}
+          onMouseEnter={e=>{ e.currentTarget.style.borderColor=T.blue; e.currentTarget.style.color=T.blue; }}
+          onMouseLeave={e=>{ e.currentTarget.style.borderColor="rgba(255,255,255,0.4)"; e.currentTarget.style.color=T.white; }}>
+            ← 学生画面
+          </button>
+        )}
       </div>
     </div>
   </div>
@@ -374,7 +427,7 @@ const wrap = (children, maxW=520) => (
 // STUDENT SIDE
 // ═══════════════════════════════════════════════════════════════
 function StudentApp() {
-  // phases: login | eval | myresult
+  // phases: login | eval | myresult | mypage
   const [phase, setPhase] = useState("login");
   const [codeInput, setCodeInput] = useState("");
   const [nameInput, setNameInput] = useState("");
@@ -395,6 +448,7 @@ function StudentApp() {
   const [myTypes, setMyTypes] = useState(null);
   const [peerAnswersOnMe, setPeerAnswersOnMe] = useState([]);
   const [myComparison, setMyComparison] = useState(null);
+  const [myPageItems, setMyPageItems] = useState([]);
 
   const targets = session ? session.members.filter(m => m !== myName) : [];
   const currentTarget = targets[targetIndex];
@@ -448,6 +502,68 @@ function StudentApp() {
     setPhase("myresult");
   };
 
+  const buildMemberResult = async (sess, name) => {
+    const raw = await stGet(`evals:${sess.code}:${name}`) || [];
+    const axes = raw.length ? computeAxes(raw) : null;
+    const types = axes ? classifyType(axes) : null;
+    const rows = [];
+    for (const member of sess.members) {
+      const evals = await stGet(`evals:${sess.code}:${member}`) || [];
+      rows.push({ name:member, axes: evals.length ? computeAxes(evals) : null });
+    }
+    const comparison = buildAxisComparison(rows);
+    return {
+      session:sess,
+      axes,
+      types,
+      comparison: comparison.byName[name] || null,
+      receivedCount: raw.length,
+      comparableTotal: comparison.total,
+    };
+  };
+
+  const handleViewResult = async () => {
+    if (!codeInput.trim() || !nameInput.trim()) {
+      setLoginError("セッションコードと名前を入力してください"); return;
+    }
+    setLoading(true);
+    const sess = await stGet(`session:${codeInput.trim().toUpperCase()}`);
+    if (!sess) { setLoginError("セッションが見つかりません。コードを確認してください。"); setLoading(false); return; }
+    if (!sess.members.includes(nameInput.trim())) {
+      setLoginError("この名前はセッションに登録されていません。"); setLoading(false); return;
+    }
+    setSession(sess);
+    setMyName(nameInput.trim());
+    await loadMyResult(sess, nameInput.trim());
+    setLoginError("");
+    setLoading(false);
+  };
+
+  const handleMyPage = async () => {
+    if (!nameInput.trim()) {
+      setLoginError("マイページを見るには名前を入力してください"); return;
+    }
+    setLoading(true);
+    const name = nameInput.trim();
+    let entries = await stGet(`student:${name}`) || [];
+
+    if (codeInput.trim()) {
+      const code = codeInput.trim().toUpperCase();
+      if (!entries.some(e => e.code === code)) entries = [{ code }, ...entries];
+    }
+
+    const items = [];
+    for (const entry of entries) {
+      const sess = await stGet(`session:${entry.code}`);
+      if (sess?.members?.includes(name)) items.push(await buildMemberResult(sess, name));
+    }
+    setMyName(name);
+    setMyPageItems(items);
+    setLoginError("");
+    setLoading(false);
+    setPhase("mypage");
+  };
+
   const handleAnswer = (c) => setSelected(c);
 
   const handleNext = async () => {
@@ -489,35 +605,64 @@ function StudentApp() {
   // ── LOGIN ──
   if (phase === "login") return wrap(
     <div className="fu">
-      <Card style={{ padding:"36px 32px" }}>
-        <SLabel>OPEN GD / STUDENT</SLabel>
-        <h1 style={{ fontSize:22, fontWeight:800, marginBottom:6, marginTop:6 }}>ログイン</h1>
-        <p style={{ fontSize:11, color:T.inkSub, marginBottom:24, lineHeight:1.7 }}>
+      {/* Hero ribbon */}
+      <div style={{ position:"relative",
+        background:T.ink, color:T.white, padding:"28px 32px 26px",
+        overflow:"hidden", border:`1.5px solid ${T.ink}` }}>
+        <div style={{ position:"absolute", top:-40, right:-80, width:200, height:280,
+          background:T.blue, transform:"rotate(20deg)" }} />
+        <div style={{ position:"absolute", top:-40, right:-40, width:8, height:280,
+          background:T.white, transform:"rotate(20deg)" }} />
+        <div style={{ position:"relative" }}>
+          <p className="mono" style={{ fontSize:10, fontWeight:700, color:T.blue,
+            letterSpacing:"0.32em", marginBottom:10 }}>━ FOR STUDENTS</p>
+          <h1 className="display" style={{ fontSize:46, fontWeight:700,
+            letterSpacing:"0.04em", lineHeight:1.0, marginBottom:8 }}>
+            ENTRY
+          </h1>
+          <p style={{ fontSize:13, fontWeight:700, letterSpacing:"0.06em",
+            color:"rgba(255,255,255,0.85)" }}>
+            セッションに参加して評価を始める
+          </p>
+        </div>
+      </div>
+
+      <Card style={{ padding:"32px 32px", borderTop:"none" }}>
+        <p style={{ fontSize:12, color:T.inkSub, marginBottom:24, lineHeight:1.85 }}>
           運営から配布されたセッションコードと、登録された氏名を入力してください。<br/>
-          評価は匿名で処理されます。
+          評価は<span style={{ color:T.blue, fontWeight:800 }}>完全匿名</span>で処理されます。
         </p>
-        <div style={{ marginBottom:14 }}>
-          <FieldLabel>セッションコード</FieldLabel>
+        <div style={{ marginBottom:16 }}>
+          <FieldLabel>SESSION CODE / セッションコード</FieldLabel>
           <Input value={codeInput} onChange={v=>setCodeInput(v.toUpperCase())}
-            placeholder="例：AB12CD"
-            style={{ fontFamily:"'Courier New',monospace", fontSize:18, fontWeight:700,
-              letterSpacing:"0.2em", textAlign:"center" }}
+            placeholder="AB12CD"
+            style={{ fontFamily:"'Oswald','Courier New',monospace", fontSize:22, fontWeight:700,
+              letterSpacing:"0.3em", textAlign:"center", background:T.g100 }}
             onKeyDown={e=>e.key==="Enter"&&handleLogin()} />
         </div>
-        <div style={{ marginBottom:20 }}>
-          <FieldLabel>あなたの名前（登録された氏名）</FieldLabel>
+        <div style={{ marginBottom:24 }}>
+          <FieldLabel>YOUR NAME / 氏名</FieldLabel>
           <Input value={nameInput} onChange={setNameInput} placeholder="田中 一郎"
             onKeyDown={e=>e.key==="Enter"&&handleLogin()} />
         </div>
         {loginError && (
-          <div style={{ background:"#fef2f2", border:"1px solid #fecaca",
-            borderRadius:2, padding:"10px 14px", marginBottom:14 }}>
-            <p style={{ fontSize:11, color:"#b05050" }}>⚠ {loginError}</p>
+          <div style={{ background:T.ink, color:T.white,
+            padding:"10px 14px", marginBottom:16,
+            borderLeft:`5px solid ${T.blue}` }}>
+            <p style={{ fontSize:11, fontWeight:700, letterSpacing:"0.05em" }}>⚠ {loginError}</p>
           </div>
         )}
         <Btn onClick={handleLogin} full disabled={loading}>
-          {loading ? "確認中…" : "開始する →"}
+          {loading ? "確認中…" : "評価を開始する →"}
         </Btn>
+        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginTop:12 }}>
+          <Btn onClick={handleViewResult} full disabled={loading} variant="ghost" small>
+            結果を見る
+          </Btn>
+          <Btn onClick={handleMyPage} full disabled={loading} variant="ghost" small>
+            マイページ
+          </Btn>
+        </div>
       </Card>
     </div>
   );
@@ -530,82 +675,101 @@ function StudentApp() {
     return wrap(
       <div className="fu" key={`${targetIndex}-${qIndex}`}>
         {/* Session info bar */}
-        <div style={{ background:T.blueL, border:`1px solid ${T.blue}`,
-          borderRadius:2, padding:"10px 16px", marginBottom:20,
-          display:"flex", justifyContent:"space-between", alignItems:"center", flexWrap:"wrap", gap:8 }}>
+        <div style={{ background:T.ink, color:T.white,
+          padding:"14px 18px", marginBottom:20,
+          display:"flex", justifyContent:"space-between", alignItems:"center", flexWrap:"wrap", gap:8,
+          borderLeft:`5px solid ${T.blue}` }}>
           <div>
-            <SLabel>SESSION {session.code}</SLabel>
-            <p style={{ fontSize:11, color:T.blue, marginTop:2, fontWeight:700 }}>
-              {session.gdType}　「{session.topic}」
+            <p className="mono" style={{ fontSize:10, fontWeight:700, color:T.blue,
+              letterSpacing:"0.22em" }}>SESSION ‹ {session.code} ›</p>
+            <p style={{ fontSize:13, color:T.white, marginTop:4, fontWeight:700,
+              letterSpacing:"0.04em" }}>
+              {session.gdType}　<span style={{ color:"rgba(255,255,255,0.6)" }}>「{session.topic}」</span>
             </p>
           </div>
-          <p style={{ fontSize:11, color:T.blue, fontWeight:700 }}>
+          <p style={{ fontSize:12, color:T.white, fontWeight:800,
+            background:T.blue, padding:"4px 12px", letterSpacing:"0.05em" }}>
             {myName}
           </p>
         </div>
 
         {/* Progress */}
-        <div style={{ marginBottom:20 }}>
+        <div style={{ marginBottom:24 }}>
           <div style={{ display:"flex", justifyContent:"space-between",
-            alignItems:"baseline", marginBottom:6 }}>
-            <p style={{ fontSize:10, fontWeight:700, color:T.inkSub }}>
-              評価中：<span style={{ color:T.ink }}>{currentTarget}</span>
+            alignItems:"baseline", marginBottom:8 }}>
+            <p style={{ fontSize:11, fontWeight:700, color:T.inkSub, letterSpacing:"0.04em" }}>
+              評価中：<span style={{ color:T.ink, fontWeight:800 }}>{currentTarget}</span>
               <span style={{ color:T.inkSub, marginLeft:8 }}>（{targetIndex+1}/{targets.length}人目）</span>
             </p>
-            <p style={{ fontFamily:"'Courier New',monospace", fontSize:10, color:T.inkSub }}>
-              Q{qIndex+1} / {questions.length}
+            <p className="mono" style={{ fontSize:13, color:T.ink, fontWeight:700,
+              letterSpacing:"0.1em" }}>
+              Q<span style={{ color:T.blue }}>{qIndex+1}</span> / {questions.length}
             </p>
           </div>
-          <div style={{ height:4, background:T.g200, borderRadius:2 }}>
+          <div style={{ height:6, background:T.g200, position:"relative" }}>
             <div style={{ height:"100%", width:`${progress}%`, background:T.blue,
-              borderRadius:2, transition:"width 0.4s ease" }} />
+              transition:"width 0.4s ease" }} />
+            <div style={{ position:"absolute", top:0, left:`${progress}%`,
+              width:2, height:6, background:T.ink, transition:"left 0.4s ease" }} />
           </div>
           {/* Member chips */}
-          <div style={{ display:"flex", gap:6, marginTop:10, flexWrap:"wrap" }}>
+          <div style={{ display:"flex", gap:6, marginTop:12, flexWrap:"wrap" }}>
             {targets.map(t => (
               <span key={t} style={{
-                fontSize:10, fontWeight:700, padding:"3px 10px", borderRadius:2,
-                background: submittedMembers[t] ? T.blueL
-                  : t===currentTarget ? T.blue : T.g100,
-                color: submittedMembers[t] ? T.blue
-                  : t===currentTarget ? T.white : T.inkSub,
-                border:`1px solid ${submittedMembers[t] ? T.blue
-                  : t===currentTarget ? T.blue : T.g200}`,
+                fontSize:10, fontWeight:800, padding:"4px 11px",
+                background: submittedMembers[t] ? T.ink
+                  : t===currentTarget ? T.blue : T.white,
+                color: submittedMembers[t] ? T.white
+                  : t===currentTarget ? T.white : T.ink,
+                border:`1.5px solid ${submittedMembers[t] ? T.ink
+                  : t===currentTarget ? T.blue : T.ink}`,
+                letterSpacing:"0.04em",
               }}>
-                {submittedMembers[t] ? "✓ " : t===currentTarget ? "→ " : ""}{t}
+                {submittedMembers[t] ? "✓ " : t===currentTarget ? "▶ " : ""}{t}
               </span>
             ))}
           </div>
         </div>
 
         {/* Question card */}
-        <Card style={{ padding:"24px 24px" }}>
-          <p style={{ fontSize:11, color:T.inkSub, fontWeight:700, marginBottom:6 }}>
-            {currentQ.text}
-          </p>
-          <p style={{ fontSize:15, fontWeight:800, color:T.ink, marginBottom:20, lineHeight:1.55 }}>
+        <Card style={{ padding:"28px 28px" }}>
+          <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:10 }}>
+            <span style={{ background:T.blue, color:T.white,
+              padding:"2px 10px", fontSize:11, fontWeight:800,
+              letterSpacing:"0.1em", fontFamily:"'Oswald',sans-serif" }}>
+              Q{qIndex+1}
+            </span>
+            <p style={{ fontSize:11, color:T.inkSub, fontWeight:700, letterSpacing:"0.04em" }}>
+              {currentQ.text}
+            </p>
+          </div>
+          <p style={{ fontSize:18, fontWeight:800, color:T.ink, marginBottom:24, lineHeight:1.55,
+            letterSpacing:"0.01em" }}>
             {currentQ.q}
           </p>
           {currentQ.choices.map(c => (
             <div key={c.id} onClick={() => !loading && handleAnswer(c.id)}
               style={{
-                display:"flex", alignItems:"center", gap:12,
-                border:`1.5px solid ${selected===c.id ? T.blue : T.g200}`,
-                background: selected===c.id ? T.blueL : T.g100,
-                borderRadius:2, padding:"13px 16px", marginBottom:9,
+                display:"flex", alignItems:"center", gap:14,
+                border:`1.5px solid ${selected===c.id ? T.ink : T.g200}`,
+                background: selected===c.id ? T.ink : T.white,
+                color: selected===c.id ? T.white : T.ink,
+                padding:"14px 16px", marginBottom:10,
                 cursor: loading ? "not-allowed" : "pointer",
                 transition:"all 0.12s",
+                boxShadow: selected===c.id ? `4px 4px 0 ${T.blue}` : "none",
+                transform: selected===c.id ? "translate(-1px,-1px)" : "none",
               }}>
-              <div style={{ width:20, height:20, borderRadius:2, flexShrink:0,
+              <div style={{ width:22, height:22, flexShrink:0,
                 border:`2px solid ${selected===c.id ? T.blue : T.g300}`,
                 background: selected===c.id ? T.blue : T.white,
                 display:"flex", alignItems:"center", justifyContent:"center" }}>
-                {selected===c.id && <span style={{ color:T.white, fontSize:10, fontWeight:900 }}>✓</span>}
+                {selected===c.id && <span style={{ color:T.white, fontSize:12, fontWeight:900 }}>✓</span>}
               </div>
-              <span style={{ fontFamily:"'Courier New',monospace", fontSize:10,
-                fontWeight:700, color: selected===c.id ? T.blue : T.g300, minWidth:12 }}>{c.id}</span>
-              <span style={{ fontSize:12, color: selected===c.id ? T.blue : T.inkMid,
-                fontWeight: selected===c.id ? 700 : 400, lineHeight:1.5 }}>{c.text}</span>
+              <span className="mono" style={{ fontSize:14,
+                fontWeight:700, color: selected===c.id ? T.blue : T.g300, minWidth:14 }}>{c.id}</span>
+              <span style={{ fontSize:13, color: selected===c.id ? T.white : T.inkMid,
+                fontWeight: selected===c.id ? 700 : 500, lineHeight:1.6 }}>{c.text}</span>
             </div>
           ))}
           <div style={{ marginTop:20 }}>
@@ -621,20 +785,127 @@ function StudentApp() {
     );
   }
 
+  // ── MY PAGE ──
+  if (phase === "mypage") return wrap(
+    <div className="rv">
+      <div style={{ position:"relative", background:T.ink, color:T.white,
+        padding:"30px 32px 28px", marginBottom:18, overflow:"hidden",
+        borderLeft:`6px solid ${T.blue}` }}>
+        <div style={{ position:"absolute", top:-50, right:-70, width:180, height:280,
+          background:T.blue, transform:"rotate(22deg)", opacity:0.95 }} />
+        <div style={{ position:"relative" }}>
+          <p className="mono" style={{ fontSize:10, fontWeight:700, color:T.blue,
+            letterSpacing:"0.3em", marginBottom:8 }}>━ MY PAGE</p>
+          <h2 className="display" style={{ fontSize:34, fontWeight:700,
+            letterSpacing:"0.04em", lineHeight:1.1, marginBottom:8 }}>
+            {myName}
+            <span style={{ fontSize:18, color:T.blue, marginLeft:10,
+              fontFamily:"'Noto Sans JP',sans-serif", letterSpacing:0 }}>さん</span>
+          </h2>
+          <p style={{ fontSize:12, opacity:0.8, lineHeight:1.7, fontWeight:600 }}>
+            参加したGDセッションごとの結果と、全回答者内での順位を確認できます。
+          </p>
+        </div>
+      </div>
+
+      {myPageItems.length === 0 ? (
+        <Card style={{ padding:"28px", textAlign:"center", marginBottom:16 }}>
+          <p style={{ fontSize:13, color:T.inkSub, lineHeight:1.7 }}>
+            表示できる結果がまだありません。<br/>
+            セッションコードも入力すると、そのセッションの結果を直接確認できます。
+          </p>
+        </Card>
+      ) : myPageItems.map(item => (
+        <Card key={item.session.code} style={{ padding:"18px 22px", marginBottom:12 }} accent>
+          <div style={{ display:"flex", justifyContent:"space-between", gap:12,
+            alignItems:"flex-start", flexWrap:"wrap", marginBottom:14 }}>
+            <div>
+              <SLabel>SESSION {item.session.code}</SLabel>
+              <h3 style={{ fontSize:15, fontWeight:800, marginTop:4 }}>
+                {item.session.topic}
+              </h3>
+              <p style={{ fontSize:10, color:T.inkSub, marginTop:3 }}>
+                {item.session.gdType}　評価者{item.receivedCount}名
+              </p>
+            </div>
+            {item.types && (
+              <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
+                <Tag blue>{item.types.involvementType}</Tag>
+                <Tag>{item.types.thinkingType}</Tag>
+              </div>
+            )}
+          </div>
+
+          {item.axes ? (
+            <div>
+              {AXES.map(a => (
+                <div key={a.key} style={{ marginBottom:12 }}>
+                  <div style={{ display:"flex", justifyContent:"space-between", marginBottom:4 }}>
+                    <span style={{ fontSize:11, fontWeight:700, color:T.inkMid }}>{a.label}</span>
+                    <span style={{ fontFamily:"'Courier New',monospace", fontSize:12,
+                      fontWeight:700, color:T.blue }}>
+                      {item.axes[a.key].toFixed(1)}
+                      {item.comparison?.[a.key] && (
+                        <span style={{ color:T.inkSub, fontSize:10, marginLeft:8 }}>
+                          {item.comparison[a.key].rank}/{item.comparison[a.key].total}位
+                        </span>
+                      )}
+                    </span>
+                  </div>
+                  <div style={{ height:5, background:T.g200, borderRadius:2 }}>
+                    <div style={{ height:"100%", borderRadius:2, background:T.blue,
+                      width:`${((item.axes[a.key]-1)/4)*100}%` }} />
+                  </div>
+                  {item.comparison?.[a.key] && (
+                    <p style={{ fontSize:10, color:T.inkSub, marginTop:4 }}>
+                      全回答者平均 {item.comparison[a.key].average.toFixed(1)}　
+                      平均差 {item.comparison[a.key].diff >= 0 ? "+" : ""}{item.comparison[a.key].diff.toFixed(1)}
+                    </p>
+                  )}
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p style={{ fontSize:12, color:T.inkSub, lineHeight:1.7 }}>
+              まだあなたへの評価が届いていません。
+            </p>
+          )}
+        </Card>
+      ))}
+
+      <Btn onClick={()=>{setPhase("login");setMyPageItems([]);setLoginError("");}}
+        full variant="ghost" sx={{ marginTop:8 }}>
+        トップに戻る
+      </Btn>
+    </div>,
+    620
+  );
+
   // ── MY RESULT ──
   if (phase === "myresult") return wrap(
     <div className="rv">
       {/* Banner */}
-      <div style={{ background:T.blue, borderRadius:2, padding:"24px 28px",
-        marginBottom:16, color:T.white }}>
-        <SLabel>YOUR RESULT</SLabel>
-        <h2 style={{ fontSize:20, fontWeight:800, margin:"6px 0 4px" }}>
-          {myName}さんへの評価
-        </h2>
-        <p style={{ fontSize:11, opacity:0.75, lineHeight:1.6 }}>
-          チームメンバーからの匿名評価を集計しました。<br/>
-          誰がどの点数をつけたかは公開されません。
-        </p>
+      <div style={{ position:"relative", background:T.ink, color:T.white,
+        padding:"30px 32px 28px", marginBottom:18, overflow:"hidden",
+        borderLeft:`6px solid ${T.blue}` }}>
+        <div style={{ position:"absolute", top:-50, right:-70, width:180, height:280,
+          background:T.blue, transform:"rotate(22deg)", opacity:0.95 }} />
+        <div style={{ position:"absolute", top:-50, right:-30, width:8, height:280,
+          background:T.white, transform:"rotate(22deg)" }} />
+        <div style={{ position:"relative" }}>
+          <p className="mono" style={{ fontSize:10, fontWeight:700, color:T.blue,
+            letterSpacing:"0.3em", marginBottom:8 }}>━ YOUR RESULT</p>
+          <h2 className="display" style={{ fontSize:34, fontWeight:700,
+            letterSpacing:"0.04em", lineHeight:1.1, marginBottom:8 }}>
+            {myName}
+            <span style={{ fontSize:18, color:T.blue, marginLeft:10,
+              fontFamily:"'Noto Sans JP',sans-serif", letterSpacing:0 }}>への評価</span>
+          </h2>
+          <p style={{ fontSize:12, opacity:0.8, lineHeight:1.7, fontWeight:600 }}>
+            チームメンバーからの匿名評価を集計しました。<br/>
+            誰がどの点数をつけたかは公開されません。
+          </p>
+        </div>
       </div>
 
       {myAxes ? (
@@ -830,6 +1101,12 @@ function AdminApp() {
     await stSet(`session:${code}`, sess);
     const list = await stGet("admin:sessions") || [];
     await stSet("admin:sessions", [sess, ...list]);
+    for (const member of members) {
+      const key = `student:${member}`;
+      const existing = await stGet(key) || [];
+      const filtered = existing.filter(item => item.code !== code);
+      await stSet(key, [{ code, topic:sess.topic, gdType:sess.gdType, createdAt:sess.createdAt }, ...filtered]);
+    }
     setSessions([sess, ...list]);
     setNewTopic(""); setNewMembers(""); setCreateError("");
     setLoading(false);
@@ -1322,12 +1599,28 @@ function AdminApp() {
 
 // ─── Root ─────────────────────────────────────────────────────
 function App() {
-  const [mode, setMode] = useState("student");
+  const [mode, setMode] = useState(
+    window.location.pathname.replace(/\/$/, "") === "/admin" ? "admin" : "student"
+  );
+
+  useEffect(() => {
+    const onPop = () => {
+      setMode(window.location.pathname.replace(/\/$/, "") === "/admin" ? "admin" : "student");
+    };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
+
+  const goStudent = () => {
+    window.history.pushState({}, "", "/");
+    setMode("student");
+  };
+
   return (
     <>
       <style>{css}</style>
-      <Nav mode={mode} setMode={setMode} />
-      <div style={{ minHeight:"calc(100vh - 50px)" }}>
+      <Nav mode={mode} goStudent={goStudent} />
+      <div style={{ minHeight:"calc(100vh - 64px)" }}>
         {mode === "student" ? <StudentApp /> : <AdminApp />}
       </div>
     </>

@@ -16,6 +16,7 @@ drop policy if exists "open_gd_admin_update_all" on public.app_storage;
 drop policy if exists "open_gd_admin_delete_all" on public.app_storage;
 drop policy if exists "open_gd_student_read_sessions" on public.app_storage;
 drop policy if exists "open_gd_student_read_results" on public.app_storage;
+drop policy if exists "open_gd_student_read_mypage" on public.app_storage;
 drop policy if exists "open_gd_student_write_evaluations" on public.app_storage;
 drop policy if exists "open_gd_student_update_evaluations" on public.app_storage;
 
@@ -55,6 +56,12 @@ on public.app_storage
 for select
 to anon
 using (key like 'evals:%');
+
+create policy "open_gd_student_read_mypage"
+on public.app_storage
+for select
+to anon
+using (key like 'student:%');
 
 create policy "open_gd_student_write_evaluations"
 on public.app_storage
