@@ -105,6 +105,8 @@ const AXES = [
   { key:"delivery",    label:"発言力",  sub:"Delivery" },
 ];
 
+const TEAM_OPTIONS = "ABCDEFGHIJKL".split("");
+
 const SCORE_MAP = {
   A:{ involvement:2, thinking:2, flexibility:1, inclusion:1, delivery:2 },
   B:{ involvement:1, thinking:2, flexibility:1, inclusion:0, delivery:2 },
@@ -201,7 +203,7 @@ function upsertSessionMember(sess, name, email, team) {
 function sessionTeamOptions(sess) {
   const configured = sess.teams || [];
   if (configured.length) return configured;
-  return ["A","B","C","D","E","F"];
+  return TEAM_OPTIONS;
 }
 
 function teamMembers(sess, team) {
@@ -729,7 +731,7 @@ function StudentApp() {
             style={{ width:"100%", border:`1.5px solid ${T.ink}`, borderRadius:0,
               padding:"12px 14px", fontSize:14, background:T.g100, color:T.ink,
               fontWeight:800, letterSpacing:"0.08em" }}>
-            {["A","B","C","D","E","F"].map(team => (
+            {TEAM_OPTIONS.map(team => (
               <option key={team} value={team}>{team}チーム</option>
             ))}
           </select>
@@ -1209,7 +1211,7 @@ function AdminApp() {
     const code = uid();
     const sess = {
       code, topic: newTopic.trim(), gdType: newGdType,
-      teams:["A","B","C","D","E","F"],
+      teams:TEAM_OPTIONS,
       members: [], createdAt: new Date().toISOString(), status:"active",
     };
     await stSet(`session:${code}`, sess);
