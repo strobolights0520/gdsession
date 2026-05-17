@@ -1,0 +1,7 @@
+.DS_Store
+node_modules/
+.vercel/
+src/config.js
+src/config.local.js
+open-gd-upload/
+open-gd-upload.zip
