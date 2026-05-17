@@ -179,6 +179,10 @@ function memberEmail(member) {
   return typeof member === "string" ? "" : (member?.email || "").toLowerCase();
 }
 
+function memberTeam(member) {
+  return typeof member === "string" ? "未設定" : (member?.team || "未設定");
+}
+
 function normalizeEmail(email) {
   return (email || "").trim().toLowerCase();
 }
@@ -188,10 +192,28 @@ function findSessionMember(sess, email) {
   return (sess.members || []).find(member => memberEmail(member) === normalized);
 }
 
-function upsertSessionMember(sess, name, email) {
+function upsertSessionMember(sess, name, email, team) {
   const normalized = normalizeEmail(email);
   const members = (sess.members || []).filter(member => memberEmail(member) !== normalized);
-  return { ...sess, members:[...members, { name:name.trim(), email:normalized }] };
+  return { ...sess, members:[...members, { name:name.trim(), email:normalized, team }] };
+}
+
+function sessionTeamOptions(sess) {
+  const configured = sess.teams || [];
+  if (configured.length) return configured;
+  return ["A","B","C","D","E","F"];
+}
+
+function teamMembers(sess, team) {
+  return (sess.members || []).filter(member => memberTeam(member) === team);
+}
+
+function evalKey(code, team, name) {
+  return `evals:${code}:${team || "未設定"}:${name}`;
+}
+
+function submittedKey(code, team, name) {
+  return `submitted:${code}:${team || "未設定"}:${name}`;
 }
 
 function getAdminAuth() {
@@ -455,10 +477,12 @@ function StudentApp() {
   const [codeInput, setCodeInput] = useState("");
   const [nameInput, setNameInput] = useState("");
   const [emailInput, setEmailInput] = useState("");
+  const [teamInput, setTeamInput] = useState("A");
   const [loginError, setLoginError] = useState("");
   const [session, setSession] = useState(null);   // loaded session object
   const [myName, setMyName] = useState("");
   const [myEmail, setMyEmail] = useState("");
+  const [myTeam, setMyTeam] = useState("");
 
   // eval state
   const [targetIndex, setTargetIndex] = useState(0); // which teammate
@@ -475,7 +499,7 @@ function StudentApp() {
   const [myComparison, setMyComparison] = useState(null);
   const [myPageItems, setMyPageItems] = useState([]);
 
-  const targets = session ? session.members.map(memberName).filter(m => m !== myName) : [];
+  const targets = session ? teamMembers(session, myTeam).map(memberName).filter(m => m !== myName) : [];
   const currentTarget = targets[targetIndex];
   const questions = session ? QUESTIONS[session.gdType] : [];
   const currentQ = questions[qIndex];
@@ -493,14 +517,15 @@ function StudentApp() {
     const code = codeInput.trim().toUpperCase();
     const email = normalizeEmail(emailInput);
     const name = nameInput.trim();
+    const team = teamInput;
     const current = await stGet(`session:${code}`);
     if (!current) { setLoginError("セッションが見つかりません。コードを確認してください。"); setLoading(false); return; }
-    const sess = upsertSessionMember(current, name, email);
+    const sess = upsertSessionMember(current, name, email, team);
     await stSet(`session:${code}`, sess);
     const studentKey = `student:${email}`;
     const existingEntries = await stGet(studentKey) || [];
     const filteredEntries = existingEntries.filter(item => item.code !== code);
-    await stSet(studentKey, [{ code, name, topic:sess.topic, gdType:sess.gdType, createdAt:sess.createdAt }, ...filteredEntries]);
+    await stSet(studentKey, [{ code, name, team, topic:sess.topic, gdType:sess.gdType, createdAt:sess.createdAt }, ...filteredEntries]);
     if (!sess) { setLoginError("セッションが見つかりません。コードを確認してください。"); setLoading(false); return; }
     const registered = findSessionMember(sess, email);
     if (!registered) {
@@ -508,32 +533,34 @@ function StudentApp() {
     }
     const resolvedName = memberName(registered);
     // Check if already submitted all
-    const existing = await stGet(`submitted:${sess.code}:${resolvedName}`);
+    const existing = await stGet(submittedKey(sess.code, memberTeam(registered), resolvedName));
     if (existing) {
       setSubmittedMembers(existing);
-      if (Object.keys(existing).length === sess.members.map(memberName).filter(m=>m!==resolvedName).length) {
+      if (Object.keys(existing).length === teamMembers(sess, memberTeam(registered)).map(memberName).filter(m=>m!==resolvedName).length) {
         // go straight to result
-        await loadMyResult(sess, resolvedName);
-        setSession(sess); setMyName(resolvedName); setMyEmail(email);
+        await loadMyResult(sess, resolvedName, memberTeam(registered));
+        setSession(sess); setMyName(resolvedName); setMyEmail(email); setMyTeam(memberTeam(registered));
         setLoading(false); return;
       }
     }
     setSession(sess);
     setMyName(resolvedName);
     setMyEmail(email);
+    setMyTeam(memberTeam(registered));
     setLoginError("");
     setLoading(false);
     setPhase("eval");
   };
 
-  const loadMyResult = async (sess, name) => {
-    const raw = await stGet(`evals:${sess.code}:${name}`) || [];
+  const loadMyResult = async (sess, name, team="") => {
+    const raw = await stGet(evalKey(sess.code, team, name)) || [];
     const axes = raw.length ? computeAxes(raw) : null;
     const types = axes ? classifyType(axes) : null;
     const rows = [];
-    for (const member of sess.members) {
+    const baseMembers = team ? teamMembers(sess, team) : sess.members;
+    for (const member of baseMembers) {
       const name = memberName(member);
-      const evals = await stGet(`evals:${sess.code}:${name}`) || [];
+      const evals = await stGet(evalKey(sess.code, team, name)) || [];
       rows.push({ name, axes: evals.length ? computeAxes(evals) : null });
     }
     const comparison = buildAxisComparison(rows);
@@ -544,14 +571,15 @@ function StudentApp() {
     setPhase("myresult");
   };
 
-  const buildMemberResult = async (sess, name) => {
-    const raw = await stGet(`evals:${sess.code}:${name}`) || [];
+  const buildMemberResult = async (sess, name, team="") => {
+    const raw = await stGet(evalKey(sess.code, team, name)) || [];
     const axes = raw.length ? computeAxes(raw) : null;
     const types = axes ? classifyType(axes) : null;
     const rows = [];
-    for (const member of sess.members) {
+    const baseMembers = team ? teamMembers(sess, team) : sess.members;
+    for (const member of baseMembers) {
       const name = memberName(member);
-      const evals = await stGet(`evals:${sess.code}:${name}`) || [];
+      const evals = await stGet(evalKey(sess.code, team, name)) || [];
       rows.push({ name, axes: evals.length ? computeAxes(evals) : null });
     }
     const comparison = buildAxisComparison(rows);
@@ -559,6 +587,7 @@ function StudentApp() {
       session:sess,
       axes,
       types,
+      team,
       comparison: comparison.byName[name] || null,
       receivedCount: raw.length,
       comparableTotal: comparison.total,
@@ -581,7 +610,8 @@ function StudentApp() {
     setSession(sess);
     setMyName(resolvedName);
     setMyEmail(email);
-    await loadMyResult(sess, resolvedName);
+    setMyTeam(memberTeam(registered));
+    await loadMyResult(sess, resolvedName, memberTeam(registered));
     setLoginError("");
     setLoading(false);
   };
@@ -606,7 +636,7 @@ function StudentApp() {
       const registered = sess ? findSessionMember(sess, email) : null;
       if (registered) {
         resolvedName = resolvedName || memberName(registered);
-        items.push(await buildMemberResult(sess, memberName(registered)));
+        items.push(await buildMemberResult(sess, memberName(registered), memberTeam(registered)));
       }
     }
     setMyName(resolvedName || email);
@@ -632,7 +662,7 @@ function StudentApp() {
       // submitted all qs for this target
       setLoading(true);
       // append to evals for target
-      const key = `evals:${session.code}:${currentTarget}`;
+      const key = evalKey(session.code, myTeam, currentTarget);
       const existing = await stGet(key) || [];
       // deduplicate by evaluator name (in case of re-submit)
       const filtered = existing.filter(e => e._by !== myName);
@@ -640,7 +670,7 @@ function StudentApp() {
 
       const newSub = { ...submittedMembers, [currentTarget]: true };
       setSubmittedMembers(newSub);
-      await stSet(`submitted:${session.code}:${myName}`, newSub);
+      await stSet(submittedKey(session.code, myTeam, myName), newSub);
 
       const remaining = targets.filter(t => !newSub[t]);
       if (remaining.length > 0) {
@@ -649,7 +679,7 @@ function StudentApp() {
         setLoading(false);
       } else {
         // all done — load my result
-        await loadMyResult(session, myName);
+        await loadMyResult(session, myName, myTeam);
         setLoading(false);
       }
     }
@@ -694,6 +724,17 @@ function StudentApp() {
             onKeyDown={e=>e.key==="Enter"&&handleLogin()} />
         </div>
         <div style={{ marginBottom:24 }}>
+          <FieldLabel>TEAM / チーム</FieldLabel>
+          <select value={teamInput} onChange={e=>setTeamInput(e.target.value)}
+            style={{ width:"100%", border:`1.5px solid ${T.ink}`, borderRadius:0,
+              padding:"12px 14px", fontSize:14, background:T.g100, color:T.ink,
+              fontWeight:800, letterSpacing:"0.08em" }}>
+            {["A","B","C","D","E","F"].map(team => (
+              <option key={team} value={team}>{team}チーム</option>
+            ))}
+          </select>
+        </div>
+        <div style={{ marginBottom:24 }}>
           <FieldLabel>YOUR NAME / 氏名</FieldLabel>
           <Input value={nameInput} onChange={setNameInput} placeholder="田中 一郎"
             onKeyDown={e=>e.key==="Enter"&&handleLogin()} />
@@ -727,6 +768,23 @@ function StudentApp() {
 
   // ── EVAL ──
   if (phase === "eval") {
+    if (targets.length === 0) return wrap(
+      <div className="fu">
+        <Card style={{ padding:"32px", textAlign:"center" }}>
+          <SLabel>WAITING TEAMMATES</SLabel>
+          <h2 style={{ fontSize:20, fontWeight:800, margin:"8px 0 10px" }}>
+            {myTeam}チームのメンバーを待っています
+          </h2>
+          <p style={{ fontSize:12, color:T.inkSub, lineHeight:1.8 }}>
+            同じチームを選んだメンバーが2名以上になると、相互評価を開始できます。
+          </p>
+          <Btn onClick={()=>setPhase("login")} full variant="ghost" sx={{ marginTop:18 }}>
+            トップに戻る
+          </Btn>
+        </Card>
+      </div>
+    );
+
     const progress = ((qIndex + targetIndex * questions.length) /
       (targets.length * questions.length)) * 100;
 
@@ -742,7 +800,7 @@ function StudentApp() {
               letterSpacing:"0.22em" }}>SESSION ‹ {session.code} ›</p>
             <p style={{ fontSize:13, color:T.white, marginTop:4, fontWeight:700,
               letterSpacing:"0.04em" }}>
-              {session.gdType}　<span style={{ color:"rgba(255,255,255,0.6)" }}>「{session.topic}」</span>
+              {session.gdType}　{myTeam}チーム　<span style={{ color:"rgba(255,255,255,0.6)" }}>「{session.topic}」</span>
             </p>
           </div>
           <p style={{ fontSize:12, color:T.white, fontWeight:800,
@@ -883,7 +941,7 @@ function StudentApp() {
                 {item.session.topic}
               </h3>
               <p style={{ fontSize:10, color:T.inkSub, marginTop:3 }}>
-                {item.session.gdType}　評価者{item.receivedCount}名
+                {item.session.gdType}　{item.team}チーム　評価者{item.receivedCount}名
               </p>
             </div>
             {item.types && (
@@ -1151,6 +1209,7 @@ function AdminApp() {
     const code = uid();
     const sess = {
       code, topic: newTopic.trim(), gdType: newGdType,
+      teams:["A","B","C","D","E","F"],
       members: [], createdAt: new Date().toISOString(), status:"active",
     };
     await stSet(`session:${code}`, sess);
@@ -1167,22 +1226,26 @@ function AdminApp() {
     const enriched = { ...sess, studentData: [] };
     for (const m of sess.members) {
       const name = memberName(m);
-      const evals = await stGet(`evals:${sess.code}:${name}`) || [];
-      const submitted = await stGet(`submitted:${sess.code}:${name}`) || {};
+      const team = memberTeam(m);
+      const evals = await stGet(evalKey(sess.code, team, name)) || [];
+      const submitted = await stGet(submittedKey(sess.code, team, name)) || {};
       const axes = evals.length ? computeAxes(evals) : null;
       const types = axes ? classifyType(axes) : null;
-      const otherMembers = sess.members.map(memberName).filter(x=>x!==name);
+      const otherMembers = teamMembers(sess, team).map(memberName).filter(x=>x!==name);
       const evalsDone = otherMembers.filter(o => submitted[o]).length;
       enriched.studentData.push({
-        name, email:memberEmail(m), evals, submitted, axes, ...types,
+        name, email:memberEmail(m), team, evals, submitted, axes, ...types,
         evalsDone, evalsTotal: otherMembers.length,
       });
     }
-    const comparison = buildAxisComparison(enriched.studentData);
-    enriched.axisComparison = comparison;
+    const comparisonsByTeam = {};
+    [...new Set(enriched.studentData.map(s => s.team))].forEach(team => {
+      comparisonsByTeam[team] = buildAxisComparison(enriched.studentData.filter(s => s.team === team));
+    });
+    enriched.axisComparison = comparisonsByTeam;
     enriched.studentData = enriched.studentData.map(s => ({
       ...s,
-      comparison: comparison.byName[s.name] || null,
+      comparison: comparisonsByTeam[s.team]?.byName[s.name] || null,
     }));
     setSelectedSession(enriched);
     setLoading(false);
@@ -1193,9 +1256,9 @@ function AdminApp() {
     if (!student.axes) return;
     const esc = (v) => `"${String(v ?? "").replaceAll('"', '""')}"`;
     const rows = [
-      ["セッション","GDタイプ","お題","氏名","メール","関与タイプ","思考タイプ",
+      ["セッション","GDタイプ","お題","チーム","氏名","メール","関与タイプ","思考タイプ",
        ...AXES.flatMap(a=>[a.label, `${a.label}平均`, `${a.label}順位`]),"評価者数"],
-      [sess.code, sess.gdType, sess.topic, student.name,
+      [sess.code, sess.gdType, sess.topic, student.team || "", student.name,
        student.email || "",
        student.involvementType||"—", student.thinkingType||"—",
        ...AXES.flatMap(a=>[
@@ -1216,10 +1279,10 @@ function AdminApp() {
   const exportAllCSV = (sess) => {
     const esc = (v) => `"${String(v ?? "").replaceAll('"', '""')}"`;
     const rows = [
-      ["セッション","GDタイプ","お題","氏名","メール","関与タイプ","思考タイプ",
+      ["セッション","GDタイプ","お題","チーム","氏名","メール","関与タイプ","思考タイプ",
        ...AXES.flatMap(a=>[a.label, `${a.label}平均`, `${a.label}順位`]),"評価者数"],
       ...(sess.studentData||[]).map(s=>[
-        sess.code, sess.gdType, sess.topic, s.name, s.email || "",
+        sess.code, sess.gdType, sess.topic, s.team || "", s.name, s.email || "",
         s.involvementType||"—", s.thinkingType||"—",
         ...AXES.flatMap(a=>[
           (s.axes?.[a.key]||0).toFixed(2),
@@ -1327,7 +1390,7 @@ function AdminApp() {
                 <SLabel>SESSION {sess.code} / STUDENT REPORT</SLabel>
                 <h1 style={{ fontSize:20, fontWeight:800, margin:"4px 0 2px" }}>{s.name}</h1>
                 <p style={{ fontSize:11, color:T.inkSub }}>
-                  評価者数：{s.evals.length}名　　GD：{sess.gdType}　「{sess.topic}」
+                  評価者数：{s.evals.length}名　　{s.team}チーム　　GD：{sess.gdType}　「{sess.topic}」
                   {s.email ? `　　${s.email}` : ""}
                 </p>
               </div>
@@ -1536,7 +1599,7 @@ function AdminApp() {
               <div>
                 <h3 style={{ fontSize:15, fontWeight:800, color:T.ink }}>{s.name}</h3>
                 <p style={{ fontSize:10, color:T.inkSub, marginTop:2 }}>
-                  自分の評価提出：{s.evalsDone}/{s.evalsTotal}名完了　　
+                  {s.team}チーム　自分の評価提出：{s.evalsDone}/{s.evalsTotal}名完了　　
                   受け取った評価：{s.evals.length}件
                   {s.email ? `　${s.email}` : ""}
                 </p>
