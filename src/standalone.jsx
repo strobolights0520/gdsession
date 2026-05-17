@@ -141,14 +141,26 @@ function classifyType(axes) {
 // ─── Shared Storage ───────────────────────────────────────────
 const SB = window.OPEN_GD_CONFIG || {};
 const useSupabase = () => Boolean(SB.SUPABASE_URL && SB.SUPABASE_ANON_KEY);
+const AUTH_KEY = "open_gd_admin_auth";
+
+function getAdminAuth() {
+  try { return JSON.parse(window.localStorage.getItem(AUTH_KEY) || "null"); }
+  catch { return null; }
+}
+
+function setAdminAuth(auth) {
+  if (auth) window.localStorage.setItem(AUTH_KEY, JSON.stringify(auth));
+  else window.localStorage.removeItem(AUTH_KEY);
+}
 
 async function sbRequest(path, options={}) {
   const base = SB.SUPABASE_URL.replace(/\/$/, "");
+  const token = getAdminAuth()?.access_token || SB.SUPABASE_ANON_KEY;
   const res = await fetch(`${base}/rest/v1/${path}`, {
     ...options,
     headers: {
       apikey: SB.SUPABASE_ANON_KEY,
-      Authorization: `Bearer ${SB.SUPABASE_ANON_KEY}`,
+      Authorization: `Bearer ${token}`,
       "Content-Type": "application/json",
       ...(options.headers || {}),
     },
@@ -156,6 +168,33 @@ async function sbRequest(path, options={}) {
   if (!res.ok) throw new Error(await res.text());
   if (res.status === 204) return null;
   return res.json();
+}
+
+async function adminSignIn(email, password) {
+  const base = SB.SUPABASE_URL.replace(/\/$/, "");
+  const res = await fetch(`${base}/auth/v1/token?grant_type=password`, {
+    method: "POST",
+    headers: {
+      apikey: SB.SUPABASE_ANON_KEY,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ email, password }),
+  });
+  if (!res.ok) throw new Error("login failed");
+  const data = await res.json();
+  const allowed = SB.ADMIN_EMAILS || [];
+  if (allowed.length && !allowed.includes(data.user?.email)) throw new Error("not allowed");
+  setAdminAuth({
+    access_token: data.access_token,
+    expires_at: Math.floor(Date.now() / 1000) + data.expires_in,
+    email: data.user?.email,
+  });
+  return data.user;
+}
+
+function hasValidAdminAuth() {
+  const auth = getAdminAuth();
+  return Boolean(auth?.access_token && auth.expires_at > Math.floor(Date.now() / 1000) + 60);
 }
 
 async function stGet(key) {
@@ -685,7 +724,8 @@ function StudentApp() {
 // ADMIN SIDE
 // ═══════════════════════════════════════════════════════════════
 function AdminApp() {
-  const [auth, setAuth] = useState(false);
+  const [auth, setAuth] = useState(hasValidAdminAuth());
+  const [emailInput, setEmailInput] = useState("");
   const [passInput, setPassInput] = useState("");
   const [passError, setPassError] = useState("");
 
@@ -710,9 +750,25 @@ function AdminApp() {
 
   useEffect(() => { if (auth) loadSessions(); }, [auth, loadSessions]);
 
-  const handleLogin = () => {
-    if (passInput === "admin2026") { setAuth(true); setPassError(""); }
-    else setPassError("パスワードが違います");
+  const handleLogin = async () => {
+    if (!useSupabase()) {
+      setPassError("Supabase接続が設定されていません");
+      return;
+    }
+    if (!emailInput.trim() || !passInput) {
+      setPassError("メールアドレスとパスワードを入力してください");
+      return;
+    }
+    setLoading(true);
+    try {
+      await adminSignIn(emailInput.trim(), passInput);
+      setAuth(true);
+      setPassError("");
+    } catch {
+      setPassError("ログインできません。管理者アカウントを確認してください。");
+    } finally {
+      setLoading(false);
+    }
   };
 
   const createSession = async () => {
@@ -794,16 +850,20 @@ function AdminApp() {
     <Card style={{ padding:"36px 32px" }} className="fu">
       <SLabel>OPEN GD / ADMIN</SLabel>
       <h2 style={{ fontSize:20, fontWeight:800, margin:"6px 0 20px" }}>管理者ログイン</h2>
+      <div style={{ marginBottom:14 }}>
+        <FieldLabel>メールアドレス</FieldLabel>
+        <Input type="email" value={emailInput} onChange={setEmailInput}
+          placeholder="admin@example.com" onKeyDown={e=>e.key==="Enter"&&handleLogin()} />
+      </div>
       <div style={{ marginBottom:16 }}>
         <FieldLabel>パスワード</FieldLabel>
         <Input type="password" value={passInput} onChange={setPassInput}
           placeholder="••••••••" onKeyDown={e=>e.key==="Enter"&&handleLogin()} />
         {passError && <p style={{ color:"#b05050", fontSize:11, marginTop:6 }}>⚠ {passError}</p>}
       </div>
-      <Btn onClick={handleLogin} full>ログイン</Btn>
-      <p style={{ fontSize:10, color:T.inkSub, marginTop:10, textAlign:"center" }}>
-        デモ用パスワード: admin2026
-      </p>
+      <Btn onClick={handleLogin} full disabled={loading}>
+        {loading ? "確認中…" : "ログイン"}
+      </Btn>
     </Card>,
     400
   );

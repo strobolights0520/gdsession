@@ -16,11 +16,7 @@ GD後の相互評価を、学生入力と管理者レポートに分けて扱う
    http://127.0.0.1:4173
    ```
 
-3. 管理者画面に入り、セッションを作成します。
-
-   ```txt
-   管理者パスワード: admin2026
-   ```
+3. 管理者画面に入り、Supabase Authで作成した管理者メールアドレスとパスワードでログインします。
 
 4. 作成されたセッションコードを参加者に共有します。
 
@@ -38,12 +34,14 @@ GD後の相互評価を、学生入力と管理者レポートに分けて扱う
 複数端末から同じセッションに参加する場合は、Supabaseを使います。
 
 1. SupabaseのSQL Editorで [supabase-schema.sql](/Users/hatakeiichiro/Documents/New%20project/supabase-schema.sql) の中身を実行します。
-2. [src/config.js](/Users/hatakeiichiro/Documents/New%20project/src/config.js) にSupabaseのProject URLを入れます。
+2. SupabaseのAuthenticationで管理者ユーザーを作成します。
+3. [src/config.js](/Users/hatakeiichiro/Documents/New%20project/src/config.js) にSupabaseのProject URLを入れます。
 
    ```js
    window.OPEN_GD_CONFIG = {
      SUPABASE_URL: "https://xxxxx.supabase.co",
      SUPABASE_ANON_KEY: "sb_publishable_xYT51KUOTcBLvOoJh_kTRA_3aCZUyzn",
+     ADMIN_EMAILS: ["admin@example.com"],
    };
    ```
 
@@ -51,7 +49,9 @@ Project URLが空の場合は、これまで通りブラウザ内保存で動き
 
 ## 注意
 
-このSupabase設定はMVP用です。公開URLを広く配る本番運用では、管理者パスワード、回答改ざん対策、行レベルの権限設計を追加してください。
+管理者ログインはSupabase Authを使います。`ADMIN_EMAILS` にメールアドレスを入れると、そのメールだけを管理者として許可します。空配列のままだとSupabase Authでログインできるユーザーを管理者として扱います。
+
+学生側はセッションコードと登録名で参加します。より厳密にする場合は、参加者ごとの招待トークンや回答締切などを追加してください。
 
 ## Vercel公開
 
