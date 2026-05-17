@@ -171,6 +171,29 @@ const SB = window.OPEN_GD_CONFIG || {};
 const useSupabase = () => Boolean(SB.SUPABASE_URL && SB.SUPABASE_ANON_KEY);
 const AUTH_KEY = "open_gd_admin_auth";
 
+function memberName(member) {
+  return typeof member === "string" ? member : member?.name;
+}
+
+function memberEmail(member) {
+  return typeof member === "string" ? "" : (member?.email || "").toLowerCase();
+}
+
+function normalizeEmail(email) {
+  return (email || "").trim().toLowerCase();
+}
+
+function findSessionMember(sess, email) {
+  const normalized = normalizeEmail(email);
+  return (sess.members || []).find(member => memberEmail(member) === normalized);
+}
+
+function upsertSessionMember(sess, name, email) {
+  const normalized = normalizeEmail(email);
+  const members = (sess.members || []).filter(member => memberEmail(member) !== normalized);
+  return { ...sess, members:[...members, { name:name.trim(), email:normalized }] };
+}
+
 function getAdminAuth() {
   try { return JSON.parse(window.localStorage.getItem(AUTH_KEY) || "null"); }
   catch { return null; }
@@ -431,9 +454,11 @@ function StudentApp() {
   const [phase, setPhase] = useState("login");
   const [codeInput, setCodeInput] = useState("");
   const [nameInput, setNameInput] = useState("");
+  const [emailInput, setEmailInput] = useState("");
   const [loginError, setLoginError] = useState("");
   const [session, setSession] = useState(null);   // loaded session object
   const [myName, setMyName] = useState("");
+  const [myEmail, setMyEmail] = useState("");
 
   // eval state
   const [targetIndex, setTargetIndex] = useState(0); // which teammate
@@ -450,7 +475,7 @@ function StudentApp() {
   const [myComparison, setMyComparison] = useState(null);
   const [myPageItems, setMyPageItems] = useState([]);
 
-  const targets = session ? session.members.filter(m => m !== myName) : [];
+  const targets = session ? session.members.map(memberName).filter(m => m !== myName) : [];
   const currentTarget = targets[targetIndex];
   const questions = session ? QUESTIONS[session.gdType] : [];
   const currentQ = questions[qIndex];
@@ -458,28 +483,44 @@ function StudentApp() {
   const allDone = targets.length > 0 && doneCount === targets.length;
 
   const handleLogin = async () => {
-    if (!codeInput.trim() || !nameInput.trim()) {
-      setLoginError("セッションコードと名前を入力してください"); return;
+    if (!useSupabase()) {
+      setLoginError("Supabase接続が設定されていません"); return;
+    }
+    if (!codeInput.trim() || !nameInput.trim() || !emailInput.trim()) {
+      setLoginError("セッションコード、名前、メールアドレスを入力してください"); return;
     }
     setLoading(true);
-    const sess = await stGet(`session:${codeInput.trim().toUpperCase()}`);
+    const code = codeInput.trim().toUpperCase();
+    const email = normalizeEmail(emailInput);
+    const name = nameInput.trim();
+    const current = await stGet(`session:${code}`);
+    if (!current) { setLoginError("セッションが見つかりません。コードを確認してください。"); setLoading(false); return; }
+    const sess = upsertSessionMember(current, name, email);
+    await stSet(`session:${code}`, sess);
+    const studentKey = `student:${email}`;
+    const existingEntries = await stGet(studentKey) || [];
+    const filteredEntries = existingEntries.filter(item => item.code !== code);
+    await stSet(studentKey, [{ code, name, topic:sess.topic, gdType:sess.gdType, createdAt:sess.createdAt }, ...filteredEntries]);
     if (!sess) { setLoginError("セッションが見つかりません。コードを確認してください。"); setLoading(false); return; }
-    if (!sess.members.includes(nameInput.trim())) {
-      setLoginError("この名前はセッションに登録されていません。"); setLoading(false); return;
+    const registered = findSessionMember(sess, email);
+    if (!registered) {
+      setLoginError("このメールアドレスはセッションに登録されていません。"); setLoading(false); return;
     }
+    const resolvedName = memberName(registered);
     // Check if already submitted all
-    const existing = await stGet(`submitted:${sess.code}:${nameInput.trim()}`);
+    const existing = await stGet(`submitted:${sess.code}:${resolvedName}`);
     if (existing) {
       setSubmittedMembers(existing);
-      if (Object.keys(existing).length === sess.members.filter(m=>m!==nameInput.trim()).length) {
+      if (Object.keys(existing).length === sess.members.map(memberName).filter(m=>m!==resolvedName).length) {
         // go straight to result
-        await loadMyResult(sess, nameInput.trim());
-        setSession(sess); setMyName(nameInput.trim());
+        await loadMyResult(sess, resolvedName);
+        setSession(sess); setMyName(resolvedName); setMyEmail(email);
         setLoading(false); return;
       }
     }
     setSession(sess);
-    setMyName(nameInput.trim());
+    setMyName(resolvedName);
+    setMyEmail(email);
     setLoginError("");
     setLoading(false);
     setPhase("eval");
@@ -491,8 +532,9 @@ function StudentApp() {
     const types = axes ? classifyType(axes) : null;
     const rows = [];
     for (const member of sess.members) {
-      const evals = await stGet(`evals:${sess.code}:${member}`) || [];
-      rows.push({ name:member, axes: evals.length ? computeAxes(evals) : null });
+      const name = memberName(member);
+      const evals = await stGet(`evals:${sess.code}:${name}`) || [];
+      rows.push({ name, axes: evals.length ? computeAxes(evals) : null });
     }
     const comparison = buildAxisComparison(rows);
     setMyAxes(axes);
@@ -508,8 +550,9 @@ function StudentApp() {
     const types = axes ? classifyType(axes) : null;
     const rows = [];
     for (const member of sess.members) {
-      const evals = await stGet(`evals:${sess.code}:${member}`) || [];
-      rows.push({ name:member, axes: evals.length ? computeAxes(evals) : null });
+      const name = memberName(member);
+      const evals = await stGet(`evals:${sess.code}:${name}`) || [];
+      rows.push({ name, axes: evals.length ? computeAxes(evals) : null });
     }
     const comparison = buildAxisComparison(rows);
     return {
@@ -523,29 +566,33 @@ function StudentApp() {
   };
 
   const handleViewResult = async () => {
-    if (!codeInput.trim() || !nameInput.trim()) {
-      setLoginError("セッションコードと名前を入力してください"); return;
+    if (!codeInput.trim() || !emailInput.trim()) {
+      setLoginError("セッションコードとメールアドレスを入力してください"); return;
     }
     setLoading(true);
+    const email = normalizeEmail(emailInput);
     const sess = await stGet(`session:${codeInput.trim().toUpperCase()}`);
     if (!sess) { setLoginError("セッションが見つかりません。コードを確認してください。"); setLoading(false); return; }
-    if (!sess.members.includes(nameInput.trim())) {
-      setLoginError("この名前はセッションに登録されていません。"); setLoading(false); return;
+    const registered = findSessionMember(sess, email);
+    if (!registered) {
+      setLoginError("このメールアドレスはセッションに登録されていません。"); setLoading(false); return;
     }
+    const resolvedName = memberName(registered);
     setSession(sess);
-    setMyName(nameInput.trim());
-    await loadMyResult(sess, nameInput.trim());
+    setMyName(resolvedName);
+    setMyEmail(email);
+    await loadMyResult(sess, resolvedName);
     setLoginError("");
     setLoading(false);
   };
 
   const handleMyPage = async () => {
-    if (!nameInput.trim()) {
-      setLoginError("マイページを見るには名前を入力してください"); return;
+    if (!emailInput.trim()) {
+      setLoginError("マイページを見るにはメールアドレスを入力してください"); return;
     }
     setLoading(true);
-    const name = nameInput.trim();
-    let entries = await stGet(`student:${name}`) || [];
+    const email = normalizeEmail(emailInput);
+    let entries = await stGet(`student:${email}`) || [];
 
     if (codeInput.trim()) {
       const code = codeInput.trim().toUpperCase();
@@ -553,11 +600,17 @@ function StudentApp() {
     }
 
     const items = [];
+    let resolvedName = "";
     for (const entry of entries) {
       const sess = await stGet(`session:${entry.code}`);
-      if (sess?.members?.includes(name)) items.push(await buildMemberResult(sess, name));
+      const registered = sess ? findSessionMember(sess, email) : null;
+      if (registered) {
+        resolvedName = resolvedName || memberName(registered);
+        items.push(await buildMemberResult(sess, memberName(registered)));
+      }
     }
-    setMyName(name);
+    setMyName(resolvedName || email);
+    setMyEmail(email);
     setMyPageItems(items);
     setLoginError("");
     setLoading(false);
@@ -625,11 +678,11 @@ function StudentApp() {
             セッションに参加して評価を始める
           </p>
         </div>
-      </div>
+        </div>
 
       <Card style={{ padding:"32px 32px", borderTop:"none" }}>
         <p style={{ fontSize:12, color:T.inkSub, marginBottom:24, lineHeight:1.85 }}>
-          運営から配布されたセッションコードと、登録された氏名を入力してください。<br/>
+          セッションコード、名前、メールアドレスを入力して参加登録してください。<br/>
           評価は<span style={{ color:T.blue, fontWeight:800 }}>完全匿名</span>で処理されます。
         </p>
         <div style={{ marginBottom:16 }}>
@@ -643,6 +696,11 @@ function StudentApp() {
         <div style={{ marginBottom:24 }}>
           <FieldLabel>YOUR NAME / 氏名</FieldLabel>
           <Input value={nameInput} onChange={setNameInput} placeholder="田中 一郎"
+            onKeyDown={e=>e.key==="Enter"&&handleLogin()} />
+        </div>
+        <div style={{ marginBottom:24 }}>
+          <FieldLabel>EMAIL / メールアドレス</FieldLabel>
+          <Input type="email" value={emailInput} onChange={setEmailInput} placeholder="student@example.com"
             onKeyDown={e=>e.key==="Enter"&&handleLogin()} />
         </div>
         {loginError && (
@@ -1025,7 +1083,7 @@ function StudentApp() {
         </Card>
       )}
 
-      <Btn onClick={()=>{setPhase("login");setCodeInput("");setNameInput("");
+      <Btn onClick={()=>{setPhase("login");setCodeInput("");
         setAllAnswers({});setSubmittedMembers({});setTargetIndex(0);setQIndex(0);setMyComparison(null);}}
         full variant="ghost" sx={{ marginTop:8 }}>
         トップに戻る
@@ -1057,7 +1115,6 @@ function AdminApp() {
   // create form
   const [newTopic, setNewTopic] = useState("");
   const [newGdType, setNewGdType] = useState("課題解決型");
-  const [newMembers, setNewMembers] = useState("");
   const [createError, setCreateError] = useState("");
 
   const loadSessions = useCallback(async () => {
@@ -1090,25 +1147,17 @@ function AdminApp() {
 
   const createSession = async () => {
     if (!newTopic.trim()) { setCreateError("お題を入力してください"); return; }
-    const members = newMembers.split(/[\n,、]/).map(m=>m.trim()).filter(Boolean);
-    if (members.length < 2) { setCreateError("メンバーを2名以上入力してください"); return; }
     setLoading(true);
     const code = uid();
     const sess = {
       code, topic: newTopic.trim(), gdType: newGdType,
-      members, createdAt: new Date().toISOString(), status:"active",
+      members: [], createdAt: new Date().toISOString(), status:"active",
     };
     await stSet(`session:${code}`, sess);
     const list = await stGet("admin:sessions") || [];
     await stSet("admin:sessions", [sess, ...list]);
-    for (const member of members) {
-      const key = `student:${member}`;
-      const existing = await stGet(key) || [];
-      const filtered = existing.filter(item => item.code !== code);
-      await stSet(key, [{ code, topic:sess.topic, gdType:sess.gdType, createdAt:sess.createdAt }, ...filtered]);
-    }
     setSessions([sess, ...list]);
-    setNewTopic(""); setNewMembers(""); setCreateError("");
+    setNewTopic(""); setCreateError("");
     setLoading(false);
     setView("dashboard");
   };
@@ -1117,14 +1166,15 @@ function AdminApp() {
     setLoading(true);
     const enriched = { ...sess, studentData: [] };
     for (const m of sess.members) {
-      const evals = await stGet(`evals:${sess.code}:${m}`) || [];
-      const submitted = await stGet(`submitted:${sess.code}:${m}`) || {};
+      const name = memberName(m);
+      const evals = await stGet(`evals:${sess.code}:${name}`) || [];
+      const submitted = await stGet(`submitted:${sess.code}:${name}`) || {};
       const axes = evals.length ? computeAxes(evals) : null;
       const types = axes ? classifyType(axes) : null;
-      const otherMembers = sess.members.filter(x=>x!==m);
+      const otherMembers = sess.members.map(memberName).filter(x=>x!==name);
       const evalsDone = otherMembers.filter(o => submitted[o]).length;
       enriched.studentData.push({
-        name:m, evals, submitted, axes, ...types,
+        name, email:memberEmail(m), evals, submitted, axes, ...types,
         evalsDone, evalsTotal: otherMembers.length,
       });
     }
@@ -1143,9 +1193,10 @@ function AdminApp() {
     if (!student.axes) return;
     const esc = (v) => `"${String(v ?? "").replaceAll('"', '""')}"`;
     const rows = [
-      ["セッション","GDタイプ","お題","氏名","関与タイプ","思考タイプ",
+      ["セッション","GDタイプ","お題","氏名","メール","関与タイプ","思考タイプ",
        ...AXES.flatMap(a=>[a.label, `${a.label}平均`, `${a.label}順位`]),"評価者数"],
       [sess.code, sess.gdType, sess.topic, student.name,
+       student.email || "",
        student.involvementType||"—", student.thinkingType||"—",
        ...AXES.flatMap(a=>[
         (student.axes?.[a.key]||0).toFixed(2),
@@ -1165,10 +1216,10 @@ function AdminApp() {
   const exportAllCSV = (sess) => {
     const esc = (v) => `"${String(v ?? "").replaceAll('"', '""')}"`;
     const rows = [
-      ["セッション","GDタイプ","お題","氏名","関与タイプ","思考タイプ",
+      ["セッション","GDタイプ","お題","氏名","メール","関与タイプ","思考タイプ",
        ...AXES.flatMap(a=>[a.label, `${a.label}平均`, `${a.label}順位`]),"評価者数"],
       ...(sess.studentData||[]).map(s=>[
-        sess.code, sess.gdType, sess.topic, s.name,
+        sess.code, sess.gdType, sess.topic, s.name, s.email || "",
         s.involvementType||"—", s.thinkingType||"—",
         ...AXES.flatMap(a=>[
           (s.axes?.[a.key]||0).toFixed(2),
@@ -1240,18 +1291,6 @@ function AdminApp() {
             placeholder="例：地方スーパーの売上回復策を提案せよ" />
         </div>
 
-        <div style={{ marginBottom:20 }}>
-          <FieldLabel>メンバー（1行1名、またはカンマ区切り）</FieldLabel>
-          <textarea value={newMembers} onChange={e=>setNewMembers(e.target.value)}
-            placeholder={"田中 一郎\n佐藤 花子\n鈴木 健太\n山田 葵"}
-            style={{ width:"100%", border:`1.5px solid ${T.g200}`, borderRadius:2,
-              padding:"9px 12px", fontSize:13, background:T.g100, color:T.ink,
-              minHeight:120, resize:"vertical" }} />
-          <p style={{ fontSize:10, color:T.inkSub, marginTop:4 }}>
-            ※ ここに入力した名前がログイン時の認証に使用されます
-          </p>
-        </div>
-
         {createError && (
           <div style={{ background:"#fef2f2", border:"1px solid #fecaca",
             borderRadius:2, padding:"10px 14px", marginBottom:14 }}>
@@ -1289,6 +1328,7 @@ function AdminApp() {
                 <h1 style={{ fontSize:20, fontWeight:800, margin:"4px 0 2px" }}>{s.name}</h1>
                 <p style={{ fontSize:11, color:T.inkSub }}>
                   評価者数：{s.evals.length}名　　GD：{sess.gdType}　「{sess.topic}」
+                  {s.email ? `　　${s.email}` : ""}
                 </p>
               </div>
               <div style={{ display:"flex", gap:8, flexWrap:"wrap", alignItems:"flex-start" }}>
@@ -1498,6 +1538,7 @@ function AdminApp() {
                 <p style={{ fontSize:10, color:T.inkSub, marginTop:2 }}>
                   自分の評価提出：{s.evalsDone}/{s.evalsTotal}名完了　　
                   受け取った評価：{s.evals.length}件
+                  {s.email ? `　${s.email}` : ""}
                 </p>
               </div>
               <div style={{ display:"flex", gap:6, alignItems:"center" }}>
