@@ -106,6 +106,7 @@ const AXES = [
 ];
 
 const TEAM_OPTIONS = "ABCDEFGHIJKL".split("");
+const TEAM_SIZE_OPTIONS = Array.from({ length:9 }, (_, i) => i + 2);
 
 const SCORE_MAP = {
   A:{ involvement:2, thinking:2, flexibility:1, inclusion:1, delivery:2 },
@@ -189,15 +190,45 @@ function normalizeEmail(email) {
   return (email || "").trim().toLowerCase();
 }
 
+function simpleHash(text) {
+  let hash = 2166136261;
+  for (let i = 0; i < text.length; i++) {
+    hash ^= text.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(36);
+}
+
+function makeParticipantId(email, team, name) {
+  return `p_${simpleHash(`${normalizeEmail(email)}|${team || ""}|${name || ""}`)}`;
+}
+
 function findSessionMember(sess, email) {
   const normalized = normalizeEmail(email);
   return (sess.members || []).find(member => memberEmail(member) === normalized);
 }
 
-function upsertSessionMember(sess, name, email, team) {
+function teamSizeFor(sess, team) {
+  const size = Number(sess.teamSizes?.[team]);
+  return TEAM_SIZE_OPTIONS.includes(size) ? size : null;
+}
+
+function upsertSessionMember(sess, name, email, team, desiredTeamSize) {
   const normalized = normalizeEmail(email);
+  const existing = (sess.members || []).find(member => memberEmail(member) === normalized);
   const members = (sess.members || []).filter(member => memberEmail(member) !== normalized);
-  return { ...sess, members:[...members, { name:name.trim(), email:normalized, team }] };
+  const currentSize = teamSizeFor(sess, team);
+  const fixedSize = currentSize || Number(desiredTeamSize) || 5;
+  return {
+    ...sess,
+    teamSizes:{ ...(sess.teamSizes || {}), [team]:fixedSize },
+    members:[...members, {
+      id: existing?.id || makeParticipantId(normalized, team, name.trim()),
+      name:name.trim(),
+      email:normalized,
+      team,
+    }],
+  };
 }
 
 function sessionTeamOptions(sess) {
@@ -217,6 +248,15 @@ function evalKey(code, team, name) {
 function submittedKey(code, team, name) {
   return `submitted:${code}:${team || "未設定"}:${name}`;
 }
+
+function participantKey(code, member) {
+  const id = typeof member === "string"
+    ? makeParticipantId("", "未設定", member)
+    : member.id || makeParticipantId(memberEmail(member), memberTeam(member), memberName(member));
+  return `${code}:${id}`;
+}
+
+const GLOBAL_RANKING_KEY = "global:rankings";
 
 function getAdminAuth() {
   try { return JSON.parse(window.localStorage.getItem(AUTH_KEY) || "null"); }
@@ -315,6 +355,53 @@ async function stSet(key, val) {
     console.warn("OPEN GD storage write failed", err);
     return false;
   }
+}
+
+async function getGlobalComparison(code, member) {
+  const global = await stGet(GLOBAL_RANKING_KEY);
+  return global?.byParticipant?.[participantKey(code, member)] || null;
+}
+
+async function buildGlobalRankingsFromSessions(sessionList) {
+  const rows = [];
+  for (const sess of sessionList) {
+    const fresh = await stGet(`session:${sess.code}`) || sess;
+    for (const member of fresh.members || []) {
+      const name = memberName(member);
+      const team = memberTeam(member);
+      const evals = await stGet(evalKey(fresh.code, team, name)) || [];
+      const axes = evals.length ? computeAxes(evals) : null;
+      if (axes) {
+        rows.push({
+          name: participantKey(fresh.code, member),
+          axes,
+          sessionCode: fresh.code,
+          team,
+        });
+      }
+    }
+  }
+
+  const comparison = buildAxisComparison(rows);
+  return {
+    updatedAt: new Date().toISOString(),
+    total: comparison.total,
+    byParticipant: Object.fromEntries(rows.map(row => [
+      row.name,
+      {
+        sessionCode: row.sessionCode,
+        team: row.team,
+        axes: row.axes,
+        comparison: comparison.byName[row.name] || null,
+      },
+    ])),
+  };
+}
+
+async function refreshGlobalRankings(sessionList) {
+  const global = await buildGlobalRankingsFromSessions(sessionList);
+  await stSet(GLOBAL_RANKING_KEY, global);
+  return global;
 }
 
 function uid() { return Math.random().toString(36).slice(2,8).toUpperCase(); }
@@ -480,6 +567,8 @@ function StudentApp() {
   const [nameInput, setNameInput] = useState("");
   const [emailInput, setEmailInput] = useState("");
   const [teamInput, setTeamInput] = useState("A");
+  const [teamSizeInput, setTeamSizeInput] = useState(5);
+  const [detectedTeamSize, setDetectedTeamSize] = useState(null);
   const [loginError, setLoginError] = useState("");
   const [session, setSession] = useState(null);   // loaded session object
   const [myName, setMyName] = useState("");
@@ -499,14 +588,48 @@ function StudentApp() {
   const [myTypes, setMyTypes] = useState(null);
   const [peerAnswersOnMe, setPeerAnswersOnMe] = useState([]);
   const [myComparison, setMyComparison] = useState(null);
+  const [myGlobalComparison, setMyGlobalComparison] = useState(null);
   const [myPageItems, setMyPageItems] = useState([]);
 
   const targets = session ? teamMembers(session, myTeam).map(memberName).filter(m => m !== myName) : [];
+  const myTeamMembers = session ? teamMembers(session, myTeam) : [];
+  const requiredTeamSize = session ? (teamSizeFor(session, myTeam) || 2) : 2;
+  const teamReady = myTeamMembers.length >= requiredTeamSize;
   const currentTarget = targets[targetIndex];
   const questions = session ? QUESTIONS[session.gdType] : [];
   const currentQ = questions[qIndex];
   const doneCount = Object.keys(submittedMembers).length;
   const allDone = targets.length > 0 && doneCount === targets.length;
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadTeamSize = async () => {
+      const code = codeInput.trim().toUpperCase();
+      if (!code) { setDetectedTeamSize(null); return; }
+      const sess = await stGet(`session:${code}`);
+      if (cancelled) return;
+      const fixed = sess ? teamSizeFor(sess, teamInput) : null;
+      setDetectedTeamSize(fixed);
+      if (fixed) setTeamSizeInput(fixed);
+    };
+    loadTeamSize();
+    return () => { cancelled = true; };
+  }, [codeInput, teamInput]);
+
+  useEffect(() => {
+    if (phase !== "eval" || !session || teamReady) return;
+    let cancelled = false;
+    const refresh = async () => {
+      const fresh = await stGet(`session:${session.code}`);
+      if (!cancelled && fresh) setSession(fresh);
+    };
+    const timer = window.setInterval(refresh, 2000);
+    refresh();
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [phase, session?.code, teamReady]);
 
   const handleLogin = async () => {
     if (!useSupabase()) {
@@ -522,7 +645,15 @@ function StudentApp() {
     const team = teamInput;
     const current = await stGet(`session:${code}`);
     if (!current) { setLoginError("セッションが見つかりません。コードを確認してください。"); setLoading(false); return; }
-    const sess = upsertSessionMember(current, name, email, team);
+    const fixedTeamSize = teamSizeFor(current, team);
+    const alreadyRegistered = findSessionMember(current, email);
+    const currentTeamMembers = teamMembers(current, team);
+    if (!alreadyRegistered && fixedTeamSize && currentTeamMembers.length >= fixedTeamSize) {
+      setLoginError(`${team}チームは定員${fixedTeamSize}名に達しています。チームを確認してください。`);
+      setLoading(false);
+      return;
+    }
+    const sess = upsertSessionMember(current, name, email, team, fixedTeamSize || teamSizeInput);
     await stSet(`session:${code}`, sess);
     const studentKey = `student:${email}`;
     const existingEntries = await stGet(studentKey) || [];
@@ -540,7 +671,7 @@ function StudentApp() {
       setSubmittedMembers(existing);
       if (Object.keys(existing).length === teamMembers(sess, memberTeam(registered)).map(memberName).filter(m=>m!==resolvedName).length) {
         // go straight to result
-        await loadMyResult(sess, resolvedName, memberTeam(registered));
+        await loadMyResult(sess, resolvedName, memberTeam(registered), email);
         setSession(sess); setMyName(resolvedName); setMyEmail(email); setMyTeam(memberTeam(registered));
         setLoading(false); return;
       }
@@ -554,7 +685,7 @@ function StudentApp() {
     setPhase("eval");
   };
 
-  const loadMyResult = async (sess, name, team="") => {
+  const loadMyResult = async (sess, name, team="", email=myEmail) => {
     const raw = await stGet(evalKey(sess.code, team, name)) || [];
     const axes = raw.length ? computeAxes(raw) : null;
     const types = axes ? classifyType(axes) : null;
@@ -566,14 +697,17 @@ function StudentApp() {
       rows.push({ name, axes: evals.length ? computeAxes(evals) : null });
     }
     const comparison = buildAxisComparison(rows);
+    const registered = findSessionMember(sess, email) || { name, email, team };
+    const globalComparison = await getGlobalComparison(sess.code, registered);
     setMyAxes(axes);
     setMyTypes(types);
     setPeerAnswersOnMe(raw);
     setMyComparison(comparison.byName[name] || null);
+    setMyGlobalComparison(globalComparison?.comparison || null);
     setPhase("myresult");
   };
 
-  const buildMemberResult = async (sess, name, team="") => {
+  const buildMemberResult = async (sess, name, team="", email=myEmail) => {
     const raw = await stGet(evalKey(sess.code, team, name)) || [];
     const axes = raw.length ? computeAxes(raw) : null;
     const types = axes ? classifyType(axes) : null;
@@ -585,12 +719,15 @@ function StudentApp() {
       rows.push({ name, axes: evals.length ? computeAxes(evals) : null });
     }
     const comparison = buildAxisComparison(rows);
+    const registered = findSessionMember(sess, email) || { name, email, team };
+    const globalComparison = await getGlobalComparison(sess.code, registered);
     return {
       session:sess,
       axes,
       types,
       team,
       comparison: comparison.byName[name] || null,
+      globalComparison: globalComparison?.comparison || null,
       receivedCount: raw.length,
       comparableTotal: comparison.total,
     };
@@ -613,7 +750,7 @@ function StudentApp() {
     setMyName(resolvedName);
     setMyEmail(email);
     setMyTeam(memberTeam(registered));
-    await loadMyResult(sess, resolvedName, memberTeam(registered));
+    await loadMyResult(sess, resolvedName, memberTeam(registered), email);
     setLoginError("");
     setLoading(false);
   };
@@ -638,7 +775,7 @@ function StudentApp() {
       const registered = sess ? findSessionMember(sess, email) : null;
       if (registered) {
         resolvedName = resolvedName || memberName(registered);
-        items.push(await buildMemberResult(sess, memberName(registered), memberTeam(registered)));
+        items.push(await buildMemberResult(sess, memberName(registered), memberTeam(registered), email));
       }
     }
     setMyName(resolvedName || email);
@@ -681,7 +818,7 @@ function StudentApp() {
         setLoading(false);
       } else {
         // all done — load my result
-        await loadMyResult(session, myName, myTeam);
+        await loadMyResult(session, myName, myTeam, myEmail);
         setLoading(false);
       }
     }
@@ -737,6 +874,29 @@ function StudentApp() {
           </select>
         </div>
         <div style={{ marginBottom:24 }}>
+          <FieldLabel>TEAM SIZE / メンバー人数</FieldLabel>
+          {detectedTeamSize ? (
+            <div style={{ border:`1.5px solid ${T.ink}`, background:T.g100,
+              padding:"12px 14px" }}>
+              <p style={{ fontSize:13, fontWeight:800, color:T.ink }}>
+                {teamInput}チームは {detectedTeamSize}人グループ として設定されています
+              </p>
+              <p style={{ fontSize:10, color:T.inkSub, marginTop:4, lineHeight:1.6 }}>
+                最初に入室したメンバーの設定に合わせます。
+              </p>
+            </div>
+          ) : (
+            <select value={teamSizeInput} onChange={e=>setTeamSizeInput(Number(e.target.value))}
+              style={{ width:"100%", border:`1.5px solid ${T.ink}`, borderRadius:0,
+                padding:"12px 14px", fontSize:14, background:T.g100, color:T.ink,
+                fontWeight:800, letterSpacing:"0.08em" }}>
+              {TEAM_SIZE_OPTIONS.map(size => (
+                <option key={size} value={size}>{size}人グループ</option>
+              ))}
+            </select>
+          )}
+        </div>
+        <div style={{ marginBottom:24 }}>
           <FieldLabel>YOUR NAME / 氏名</FieldLabel>
           <Input value={nameInput} onChange={setNameInput} placeholder="田中 一郎"
             onKeyDown={e=>e.key==="Enter"&&handleLogin()} />
@@ -770,15 +930,37 @@ function StudentApp() {
 
   // ── EVAL ──
   if (phase === "eval") {
-    if (targets.length === 0) return wrap(
+    if (!teamReady) return wrap(
       <div className="fu">
-        <Card style={{ padding:"32px", textAlign:"center" }}>
+        <Card style={{ padding:"32px" }}>
           <SLabel>WAITING TEAMMATES</SLabel>
-          <h2 style={{ fontSize:20, fontWeight:800, margin:"8px 0 10px" }}>
-            {myTeam}チームのメンバーを待っています
+          <h2 style={{ fontSize:20, fontWeight:800, margin:"8px 0 10px", textAlign:"center" }}>
+            {myTeam}チーム 待機中
           </h2>
-          <p style={{ fontSize:12, color:T.inkSub, lineHeight:1.8 }}>
-            同じチームを選んだメンバーが2名以上になると、相互評価を開始できます。
+          <p className="display" style={{ fontSize:36, color:T.blue, textAlign:"center",
+            lineHeight:1.1, marginBottom:8 }}>
+            {myTeamMembers.length} / {requiredTeamSize}
+          </p>
+          <p style={{ fontSize:12, color:T.inkSub, lineHeight:1.8, textAlign:"center" }}>
+            あと{Math.max(requiredTeamSize - myTeamMembers.length, 0)}人揃うと評価を開始できます。<br/>
+            この画面は2秒ごとに自動更新されます。
+          </p>
+          <Divider my={18} />
+          <FieldLabel>JOINED MEMBERS / 参加済み</FieldLabel>
+          <div style={{ display:"flex", flexWrap:"wrap", gap:8, marginTop:10 }}>
+            {myTeamMembers.map(member => (
+              <span key={memberEmail(member) || memberName(member)} style={{
+                border:`1.5px solid ${T.ink}`,
+                background: memberName(member) === myName ? T.blue : T.white,
+                color: memberName(member) === myName ? T.white : T.ink,
+                padding:"7px 12px", fontSize:12, fontWeight:800,
+              }}>
+                {memberName(member)}
+              </span>
+            ))}
+          </div>
+          <p style={{ fontSize:10, color:T.inkSub, marginTop:16, lineHeight:1.7 }}>
+            人数設定が違う場合は、評価開始前に全員で同じ別チームを選び直してください。
           </p>
           <Btn onClick={()=>setPhase("login")} full variant="ghost" sx={{ marginTop:18 }}>
             トップに戻る
@@ -965,7 +1147,7 @@ function StudentApp() {
                       {item.axes[a.key].toFixed(1)}
                       {item.comparison?.[a.key] && (
                         <span style={{ color:T.inkSub, fontSize:10, marginLeft:8 }}>
-                          {item.comparison[a.key].rank}/{item.comparison[a.key].total}位
+                          チーム内 {item.comparison[a.key].rank}/{item.comparison[a.key].total}位
                         </span>
                       )}
                     </span>
@@ -976,8 +1158,15 @@ function StudentApp() {
                   </div>
                   {item.comparison?.[a.key] && (
                     <p style={{ fontSize:10, color:T.inkSub, marginTop:4 }}>
-                      全回答者平均 {item.comparison[a.key].average.toFixed(1)}　
+                      チーム平均 {item.comparison[a.key].average.toFixed(1)}　
                       平均差 {item.comparison[a.key].diff >= 0 ? "+" : ""}{item.comparison[a.key].diff.toFixed(1)}
+                    </p>
+                  )}
+                  {item.globalComparison?.[a.key] && (
+                    <p style={{ fontSize:10, color:T.blue, marginTop:2, fontWeight:700 }}>
+                      全開催 {item.globalComparison[a.key].rank}/{item.globalComparison[a.key].total}位　
+                      平均 {item.globalComparison[a.key].average.toFixed(1)}　
+                      平均差 {item.globalComparison[a.key].diff >= 0 ? "+" : ""}{item.globalComparison[a.key].diff.toFixed(1)}
                     </p>
                   )}
                 </div>
@@ -1058,7 +1247,7 @@ function StudentApp() {
                       {myAxes[a.key].toFixed(1)}
                       {myComparison?.[a.key] && (
                         <span style={{ color:T.inkSub, fontSize:10, marginLeft:8 }}>
-                          {myComparison[a.key].rank}/{myComparison[a.key].total}位
+                          チーム内 {myComparison[a.key].rank}/{myComparison[a.key].total}位
                         </span>
                       )}
                     </span>
@@ -1070,8 +1259,15 @@ function StudentApp() {
                   </div>
                   {myComparison?.[a.key] && (
                     <p style={{ fontSize:10, color:T.inkSub, marginTop:4 }}>
-                      平均 {myComparison[a.key].average.toFixed(1)}　
+                      チーム平均 {myComparison[a.key].average.toFixed(1)}　
                       平均差 {myComparison[a.key].diff >= 0 ? "+" : ""}{myComparison[a.key].diff.toFixed(1)}
+                    </p>
+                  )}
+                  {myGlobalComparison?.[a.key] && (
+                    <p style={{ fontSize:10, color:T.blue, marginTop:2, fontWeight:700 }}>
+                      全開催 {myGlobalComparison[a.key].rank}/{myGlobalComparison[a.key].total}位　
+                      平均 {myGlobalComparison[a.key].average.toFixed(1)}　
+                      平均差 {myGlobalComparison[a.key].diff >= 0 ? "+" : ""}{myGlobalComparison[a.key].diff.toFixed(1)}
                     </p>
                   )}
                 </div>
@@ -1144,7 +1340,7 @@ function StudentApp() {
       )}
 
       <Btn onClick={()=>{setPhase("login");setCodeInput("");
-        setAllAnswers({});setSubmittedMembers({});setTargetIndex(0);setQIndex(0);setMyComparison(null);}}
+        setAllAnswers({});setSubmittedMembers({});setTargetIndex(0);setQIndex(0);setMyComparison(null);setMyGlobalComparison(null);}}
         full variant="ghost" sx={{ marginTop:8 }}>
         トップに戻る
       </Btn>
@@ -1171,6 +1367,7 @@ function AdminApp() {
   const [selectedStudent, setSelectedStudent] = useState(null);
   const [reportTab, setReportTab] = useState("overview");
   const [loading, setLoading] = useState(false);
+  const [globalSummary, setGlobalSummary] = useState(null);
 
   // create form
   const [newTopic, setNewTopic] = useState("");
@@ -1180,6 +1377,10 @@ function AdminApp() {
   const loadSessions = useCallback(async () => {
     const list = await stGet("admin:sessions") || [];
     setSessions(list);
+    if (list.length) {
+      const global = await refreshGlobalRankings(list);
+      setGlobalSummary(global);
+    }
   }, []);
 
   useEffect(() => { if (auth) loadSessions(); }, [auth, loadSessions]);
@@ -1218,6 +1419,7 @@ function AdminApp() {
     const list = await stGet("admin:sessions") || [];
     await stSet("admin:sessions", [sess, ...list]);
     setSessions([sess, ...list]);
+    setGlobalSummary(await refreshGlobalRankings([sess, ...list]));
     setNewTopic(""); setCreateError("");
     setLoading(false);
     setView("dashboard");
@@ -1236,6 +1438,7 @@ function AdminApp() {
       const otherMembers = teamMembers(sess, team).map(memberName).filter(x=>x!==name);
       const evalsDone = otherMembers.filter(o => submitted[o]).length;
       enriched.studentData.push({
+        id: typeof m === "string" ? "" : m.id,
         name, email:memberEmail(m), team, evals, submitted, axes, ...types,
         evalsDone, evalsTotal: otherMembers.length,
       });
@@ -1244,10 +1447,14 @@ function AdminApp() {
     [...new Set(enriched.studentData.map(s => s.team))].forEach(team => {
       comparisonsByTeam[team] = buildAxisComparison(enriched.studentData.filter(s => s.team === team));
     });
+    const sessionList = await stGet("admin:sessions") || [];
+    const global = await refreshGlobalRankings(sessionList.length ? sessionList : [sess]);
+    setGlobalSummary(global);
     enriched.axisComparison = comparisonsByTeam;
     enriched.studentData = enriched.studentData.map(s => ({
       ...s,
       comparison: comparisonsByTeam[s.team]?.byName[s.name] || null,
+      globalComparison: global.byParticipant?.[participantKey(sess.code, { id:s.id, name:s.name, email:s.email, team:s.team })]?.comparison || null,
     }));
     setSelectedSession(enriched);
     setLoading(false);
@@ -1259,7 +1466,7 @@ function AdminApp() {
     const esc = (v) => `"${String(v ?? "").replaceAll('"', '""')}"`;
     const rows = [
       ["セッション","GDタイプ","お題","チーム","氏名","メール","関与タイプ","思考タイプ",
-       ...AXES.flatMap(a=>[a.label, `${a.label}平均`, `${a.label}順位`]),"評価者数"],
+       ...AXES.flatMap(a=>[a.label, `${a.label}チーム平均`, `${a.label}チーム順位`, `${a.label}全開催平均`, `${a.label}全開催順位`]),"評価者数"],
       [sess.code, sess.gdType, sess.topic, student.team || "", student.name,
        student.email || "",
        student.involvementType||"—", student.thinkingType||"—",
@@ -1268,6 +1475,10 @@ function AdminApp() {
         student.comparison?.[a.key]?.average?.toFixed(2) || "",
         student.comparison?.[a.key]
           ? `${student.comparison[a.key].rank}/${student.comparison[a.key].total}`
+          : "",
+        student.globalComparison?.[a.key]?.average?.toFixed(2) || "",
+        student.globalComparison?.[a.key]
+          ? `${student.globalComparison[a.key].rank}/${student.globalComparison[a.key].total}`
           : "",
        ]),
        student.evals.length],
@@ -1282,7 +1493,7 @@ function AdminApp() {
     const esc = (v) => `"${String(v ?? "").replaceAll('"', '""')}"`;
     const rows = [
       ["セッション","GDタイプ","お題","チーム","氏名","メール","関与タイプ","思考タイプ",
-       ...AXES.flatMap(a=>[a.label, `${a.label}平均`, `${a.label}順位`]),"評価者数"],
+       ...AXES.flatMap(a=>[a.label, `${a.label}チーム平均`, `${a.label}チーム順位`, `${a.label}全開催平均`, `${a.label}全開催順位`]),"評価者数"],
       ...(sess.studentData||[]).map(s=>[
         sess.code, sess.gdType, sess.topic, s.team || "", s.name, s.email || "",
         s.involvementType||"—", s.thinkingType||"—",
@@ -1291,6 +1502,10 @@ function AdminApp() {
           s.comparison?.[a.key]?.average?.toFixed(2) || "",
           s.comparison?.[a.key]
             ? `${s.comparison[a.key].rank}/${s.comparison[a.key].total}`
+            : "",
+          s.globalComparison?.[a.key]?.average?.toFixed(2) || "",
+          s.globalComparison?.[a.key]
+            ? `${s.globalComparison[a.key].rank}/${s.globalComparison[a.key].total}`
             : "",
         ]),
         s.evals.length,
@@ -1432,7 +1647,7 @@ function AdminApp() {
                             {s.axes[a.key].toFixed(1)}
                             {s.comparison?.[a.key] && (
                               <span style={{ color:T.inkSub, fontSize:10, marginLeft:8 }}>
-                                {s.comparison[a.key].rank}/{s.comparison[a.key].total}位
+                                チーム内 {s.comparison[a.key].rank}/{s.comparison[a.key].total}位
                               </span>
                             )}
                           </span>
@@ -1444,8 +1659,14 @@ function AdminApp() {
                         </div>
                         {s.comparison?.[a.key] && (
                           <p style={{ fontSize:10, color:T.inkSub, marginTop:4 }}>
-                            平均 {s.comparison[a.key].average.toFixed(1)}　
+                            チーム平均 {s.comparison[a.key].average.toFixed(1)}　
                             平均差 {s.comparison[a.key].diff >= 0 ? "+" : ""}{s.comparison[a.key].diff.toFixed(1)}
+                          </p>
+                        )}
+                        {s.globalComparison?.[a.key] && (
+                          <p style={{ fontSize:10, color:T.blue, marginTop:2, fontWeight:700 }}>
+                            全開催 {s.globalComparison[a.key].rank}/{s.globalComparison[a.key].total}位　
+                            平均 {s.globalComparison[a.key].average.toFixed(1)}
                           </p>
                         )}
                       </div>
@@ -1627,7 +1848,12 @@ function AdminApp() {
                       fontWeight:700, color:T.blue }}>{s.axes[a.key].toFixed(1)}</p>
                     {s.comparison?.[a.key] && (
                       <p style={{ fontSize:9, color:T.inkSub }}>
-                        {s.comparison[a.key].rank}/{s.comparison[a.key].total}位
+                        チーム内 {s.comparison[a.key].rank}/{s.comparison[a.key].total}位
+                      </p>
+                    )}
+                    {s.globalComparison?.[a.key] && (
+                      <p style={{ fontSize:9, color:T.blue, fontWeight:700 }}>
+                        全開催 {s.globalComparison[a.key].rank}/{s.globalComparison[a.key].total}位
                       </p>
                     )}
                   </div>
@@ -1657,6 +1883,7 @@ function AdminApp() {
         {[
           ["セッション数", sessions.length],
           ["総参加者数", sessions.reduce((s,a)=>s+a.members.length,0)],
+          ["全開催ランキング対象", globalSummary?.total || 0],
           ["アクティブ", sessions.filter(s=>s.status==="active").length],
         ].map(([k,v])=>(
           <Card key={k} style={{ padding:"14px 18px" }}>
