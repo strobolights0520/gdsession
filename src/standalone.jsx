@@ -498,7 +498,7 @@ const FieldLabel = ({ children }) => (
 );
 
 // ─── Nav ─────────────────────────────────────────────────────
-const Nav = ({ mode, goStudent }) => (
+const Nav = ({ mode, goStudent, goHelp }) => (
   <div style={{ background:T.ink, position:"sticky", top:0, zIndex:100,
     borderBottom:`3px solid ${T.blue}` }}>
     <div style={{ maxWidth:1040, margin:"0 auto", padding:"0 24px",
@@ -530,9 +530,22 @@ const Nav = ({ mode, goStudent }) => (
             padding:"6px 14px", fontSize:11, fontWeight:800,
             letterSpacing:"0.12em",
             fontFamily:"'Oswald','Noto Sans JP',sans-serif" }}>
-            {mode==="admin" ? "管理者 / ADMIN" : "学生 / STUDENT"}
+            {mode==="admin" ? "管理者 / ADMIN" : mode==="help" ? "使い方 / HELP" : "学生 / STUDENT"}
           </span>
         </div>
+        <button onClick={goHelp} style={{
+          background: mode==="help" ? T.blue : "transparent",
+          color:T.white,
+          border:`1.5px solid ${mode==="help" ? T.blue : "rgba(255,255,255,0.4)"}`,
+          borderRadius:0, padding:"6px 14px",
+          fontSize:10, fontWeight:800, cursor:"pointer",
+          transition:"all 0.15s", letterSpacing:"0.12em",
+          fontFamily:"'Oswald','Noto Sans JP',sans-serif",
+        }}
+        onMouseEnter={e=>{ if(mode!=="help"){ e.currentTarget.style.borderColor=T.blue; e.currentTarget.style.color=T.blue; } }}
+        onMouseLeave={e=>{ if(mode!=="help"){ e.currentTarget.style.borderColor="rgba(255,255,255,0.4)"; e.currentTarget.style.color=T.white; } }}>
+          使い方
+        </button>
         {/* admin→学生 ショートカット */}
         {mode === "admin" && (
           <button onClick={goStudent} style={{
@@ -556,6 +569,107 @@ const Nav = ({ mode, goStudent }) => (
 const wrap = (children, maxW=520) => (
   <div style={{ maxWidth:maxW, margin:"0 auto", padding:"40px 20px 80px" }}>{children}</div>
 );
+
+const StepItem = ({ num, title, body }) => (
+  <div style={{ display:"grid", gridTemplateColumns:"42px 1fr", gap:14,
+    padding:"16px 0", borderBottom:`1px solid ${T.g200}` }}>
+    <div className="display" style={{ width:42, height:42, background:T.ink,
+      color:T.white, display:"flex", alignItems:"center", justifyContent:"center",
+      fontSize:18, borderLeft:`5px solid ${T.blue}` }}>
+      {num}
+    </div>
+    <div>
+      <h3 style={{ fontSize:14, fontWeight:800, marginBottom:5 }}>{title}</h3>
+      <p style={{ fontSize:12, color:T.inkSub, lineHeight:1.8 }}>{body}</p>
+    </div>
+  </div>
+);
+
+const Note = ({ children }) => (
+  <div style={{ background:T.blueL, border:`1px solid ${T.blue}`,
+    padding:"12px 14px", marginTop:12 }}>
+    <p style={{ fontSize:11, color:T.ink, lineHeight:1.75, fontWeight:600 }}>{children}</p>
+  </div>
+);
+
+function HelpPage({ goStudent, goAdmin }) {
+  return (
+    <div style={{ maxWidth:960, margin:"0 auto", padding:"36px 24px 80px" }} className="fu">
+      <div style={{ background:T.ink, color:T.white, padding:"30px 34px",
+        borderLeft:`6px solid ${T.blue}`, marginBottom:22 }}>
+        <p className="mono" style={{ fontSize:10, fontWeight:700, color:T.blue,
+          letterSpacing:"0.3em", marginBottom:8 }}>━ HOW TO USE</p>
+        <h1 className="display" style={{ fontSize:42, lineHeight:1, marginBottom:10 }}>
+          OPEN GDの使い方
+        </h1>
+        <p style={{ fontSize:13, color:"rgba(255,255,255,0.78)", lineHeight:1.8, fontWeight:600 }}>
+          学生はセッションコードで入室し、チーム人数が揃ったら相互評価を行います。管理者はセッションを作成し、結果と進捗を確認できます。
+        </p>
+      </div>
+
+      <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(280px,1fr))", gap:18 }}>
+        <Card style={{ padding:"22px 26px" }} accent>
+          <SLabel>STUDENTS</SLabel>
+          <h2 style={{ fontSize:19, fontWeight:800, margin:"8px 0 6px" }}>学生の流れ</h2>
+          <StepItem num="1" title="セッションコードを入力"
+            body="管理者から共有された6桁のコードを入力します。チームはA〜Lから選びます。" />
+          <StepItem num="2" title="メンバー人数を選ぶ"
+            body="各チームで最初に入った人が2〜10人から人数を設定します。後から入る人はその人数設定に合わせます。" />
+          <StepItem num="3" title="名前とメールで参加"
+            body="名前とメールアドレスを入力して入室します。メールアドレスはマイページで過去結果を見る時にも使います。" />
+          <StepItem num="4" title="待機画面でメンバーを待つ"
+            body="設定人数が揃うまでは評価を開始できません。待機画面は2秒ごとに自動更新されます。" />
+          <StepItem num="5" title="同じチームのメンバーを評価"
+            body="人数が揃うと評価画面に進みます。自分以外の同じチームメンバーを順番に評価します。" />
+          <StepItem num="6" title="結果・マイページを見る"
+            body="評価完了後、自分の5軸スコア、チーム内順位、全開催順位、平均との差を確認できます。" />
+          <Note>
+            人数設定を間違えた場合は、評価開始前に全員で同じ別チームを選び直してください。満員のチームには追加参加できません。
+          </Note>
+        </Card>
+
+        <Card style={{ padding:"22px 26px" }} accent>
+          <SLabel>ADMIN</SLabel>
+          <h2 style={{ fontSize:19, fontWeight:800, margin:"8px 0 6px" }}>管理者の流れ</h2>
+          <StepItem num="1" title="管理者画面にログイン"
+            body="画面URLの末尾に /admin を付けると管理者画面に入れます。Supabase Authで作成した管理者アカウントを使います。" />
+          <StepItem num="2" title="セッションを作成"
+            body="GDタイプとお題を入力してセッションを作成します。作成後、学生に共有するセッションコードが発行されます。" />
+          <StepItem num="3" title="学生にコードを共有"
+            body="学生はコード、チーム、人数、氏名、メールアドレスで入室します。チーム人数は学生側で固定されます。" />
+          <StepItem num="4" title="進捗と結果を確認"
+            body="セッション詳細で、参加者、提出状況、受け取った評価数、個人レポートを確認できます。" />
+          <StepItem num="5" title="CSVを書き出す"
+            body="個人単位またはセッション全体でCSV出力できます。チーム内順位と全開催順位も含まれます。" />
+          <StepItem num="6" title="全開催ランキングを更新"
+            body="管理者がログインした時、またはセッション詳細を開いた時に全開催ランキングが更新されます。" />
+          <Note>
+            Supabase接続、管理者メール、Vercel環境変数が正しく設定されていない場合は、ログインやデータ保存が動きません。
+          </Note>
+        </Card>
+      </div>
+
+      <Card style={{ padding:"22px 26px", marginTop:18 }}>
+        <SLabel>QUICK GUIDE</SLabel>
+        <h2 style={{ fontSize:18, fontWeight:800, margin:"8px 0 14px" }}>当日の案内文サンプル</h2>
+        <div style={{ background:T.g100, border:`1px solid ${T.g200}`, padding:"16px 18px" }}>
+          <p style={{ fontSize:12, color:T.inkMid, lineHeight:1.9, fontWeight:600 }}>
+            これから相互評価を行います。画面を開いて、セッションコードを入力してください。チームは自分のグループを選んでください。
+            最初に入った人はチーム人数を選びます。人数が揃うまで待機画面でお待ちください。全員揃うと評価が始められます。
+            評価後は、自分の結果とマイページを確認できます。
+          </p>
+        </div>
+      </Card>
+
+      <div style={{ marginTop:18, display:"flex", gap:10, flexWrap:"wrap" }}>
+        <Btn onClick={goStudent}>学生画面へ戻る</Btn>
+        <Btn onClick={goAdmin} variant="ghost">
+          管理者画面へ
+        </Btn>
+      </div>
+    </div>
+  );
+}
 
 // ═══════════════════════════════════════════════════════════════
 // STUDENT SIDE
@@ -1932,13 +2046,19 @@ function AdminApp() {
 
 // ─── Root ─────────────────────────────────────────────────────
 function App() {
+  const resolveMode = () => {
+    const path = window.location.pathname.replace(/\/$/, "");
+    if (path === "/admin") return "admin";
+    if (path === "/help") return "help";
+    return "student";
+  };
   const [mode, setMode] = useState(
-    window.location.pathname.replace(/\/$/, "") === "/admin" ? "admin" : "student"
+    resolveMode()
   );
 
   useEffect(() => {
     const onPop = () => {
-      setMode(window.location.pathname.replace(/\/$/, "") === "/admin" ? "admin" : "student");
+      setMode(resolveMode());
     };
     window.addEventListener("popstate", onPop);
     return () => window.removeEventListener("popstate", onPop);
@@ -1949,12 +2069,22 @@ function App() {
     setMode("student");
   };
 
+  const goHelp = () => {
+    window.history.pushState({}, "", "/help");
+    setMode("help");
+  };
+
+  const goAdmin = () => {
+    window.history.pushState({}, "", "/admin");
+    setMode("admin");
+  };
+
   return (
     <>
       <style>{css}</style>
-      <Nav mode={mode} goStudent={goStudent} />
+      <Nav mode={mode} goStudent={goStudent} goHelp={goHelp} />
       <div style={{ minHeight:"calc(100vh - 64px)" }}>
-        {mode === "student" ? <StudentApp /> : <AdminApp />}
+        {mode === "student" ? <StudentApp /> : mode === "help" ? <HelpPage goStudent={goStudent} goAdmin={goAdmin} /> : <AdminApp />}
       </div>
     </>
   );
